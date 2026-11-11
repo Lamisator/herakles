@@ -84,7 +84,7 @@ tar -C "$build/release" -cf - . | remote "set -e
 
 echo "== checking $URL"
 for _ in $(seq 30); do
-  if curl -fsS "$URL/" | grep -q "Herakles $VERSION"; then
+  if curl -fs "$URL/" 2>/dev/null | grep -q "Herakles $VERSION"; then
     curl -fsS "$URL/downloads/SHA256SUMS" | diff - "$build/downloads/SHA256SUMS" && echo "deployed $VERSION to $URL"
     exit 0
   fi
