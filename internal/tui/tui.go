@@ -49,6 +49,7 @@ type UI struct {
 	yaml      *tview.TextArea
 
 	current string
+	wiz     *wiz // the open backup wizard (tests)
 	mu      sync.Mutex
 	open    map[string]*repository.Repository
 }
@@ -160,7 +161,7 @@ func (u *UI) show(name string) {
 	}
 	u.header.SetText("[::b]HERAKLES[::-] " + strings.Join(parts, ""))
 	hints := map[string]string{
-		"dashboard": "[yellow]Enter/r[-] run  [yellow]f[-] full  [yellow]i[-] incremental  [yellow]e[-] edit  [yellow]n[-] new job  [yellow]Del[-] delete  [yellow]c[-] cancel  [yellow]q[-] quit",
+		"dashboard": "[yellow]w[-] backup wizard  [yellow]Enter/r[-] run  [yellow]f[-] full  [yellow]i[-] incremental  [yellow]e[-] edit  [yellow]n[-] new job  [yellow]Del[-] delete  [yellow]c[-] cancel  [yellow]q[-] quit",
 		"repos":     "[yellow]n[-] new  [yellow]e[-] edit  [yellow]I[-] init  [yellow]k[-] check  [yellow]p[-] prune  [yellow]s[-] stats  [yellow]Del[-] delete  [yellow]q[-] quit",
 		"snapshots": "[yellow]Tab[-] focus  [yellow]Enter[-] browse  [yellow]r[-] restore  [yellow]d[-] forget snapshot  [yellow]R[-] reload  [yellow]Esc[-] back",
 		"yaml":      "[yellow]Ctrl-S[-] validate & save  [yellow]Ctrl-R[-] revert  [yellow]Esc[-] leave editor",
@@ -215,6 +216,11 @@ func (u *UI) modal(name string, p tview.Primitive, w, h int) {
 
 func (u *UI) closeModal(name string) {
 	u.pages.RemovePage("modal-" + name)
+	// Return to a dialog underneath (e.g. a message over the wizard).
+	if front, p := u.pages.GetFrontPage(); strings.HasPrefix(front, "modal") {
+		u.app.SetFocus(p)
+		return
+	}
 	u.show(u.current)
 }
 
@@ -340,6 +346,8 @@ func (u *UI) buildDashboard() tview.Primitive {
 			u.editJob(job)
 		case ev.Rune() == 'n':
 			u.editJob(nil)
+		case ev.Rune() == 'w':
+			u.startWizard()
 		case ev.Rune() == 'c' && job != nil:
 			if !u.runner.Cancel(daemon.KindBackup + ":" + job.Name) {
 				u.message("Cancel", "No active run for "+job.Name)
@@ -399,14 +407,18 @@ func (u *UI) refreshJobs() {
 		if j.Disabled {
 			sched = []string{"[gray]disabled"}
 		}
-		src := strings.Join(append(append([]string(nil), j.Paths...), j.Devices...), ", ")
+		srcs := append(append([]string(nil), j.Paths...), j.Devices...)
+		if j.Docker != nil {
+			srcs = append([]string{"Docker projects"}, srcs...)
+		}
+		src := strings.Join(srcs, ", ")
 		u.jobs.SetCell(i+1, 0, tview.NewTableCell(j.Name).SetExpansion(1))
 		u.jobs.SetCell(i+1, 1, tview.NewTableCell(j.Repository).SetExpansion(1))
 		u.jobs.SetCell(i+1, 2, tview.NewTableCell(src).SetExpansion(2).SetMaxWidth(40))
 		u.jobs.SetCell(i+1, 3, tview.NewTableCell(strings.Join(sched, "; ")).SetExpansion(2).SetMaxWidth(40))
 	}
 	if len(cfg.Jobs) == 0 {
-		u.jobs.SetCell(1, 0, tview.NewTableCell("[gray]no jobs — press n to create one").SetSelectable(false))
+		u.jobs.SetCell(1, 0, tview.NewTableCell("[gray]no jobs yet — press w for the backup wizard (or n for the job form)").SetSelectable(false))
 	}
 	u.refreshJobStatus()
 	if row < 1 {

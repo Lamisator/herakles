@@ -2,12 +2,14 @@ package tui
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/engine"
@@ -152,4 +154,110 @@ func TestTUIJobEditor(t *testing.T) {
 	// Quit confirmation.
 	h.rune('q')
 	h.waitFor("Quit Herakles?")
+}
+
+// onUI runs fn on the UI goroutine and waits for it.
+func (h *harness) onUI(fn func()) {
+	done := make(chan struct{})
+	h.ui.app.QueueUpdateDraw(func() { fn(); close(done) })
+	<-done
+}
+
+// form returns the form of the current wizard step.
+func (h *harness) wizForm() *tview.Form {
+	var f *tview.Form
+	h.onUI(func() {
+		item := h.ui.wiz.flex.GetItem(1)
+		if fl, ok := item.(*tview.Flex); ok {
+			item = fl.GetItem(0)
+		}
+		f, _ = item.(*tview.Form)
+	})
+	return f
+}
+
+func (h *harness) wizClick(label string) {
+	h.t.Helper()
+	f := h.wizForm()
+	h.onUI(func() { h.ui.app.SetFocus(f.GetButton(f.GetButtonIndex(label))) })
+	h.key(tcell.KeyEnter, 0)
+}
+
+func (h *harness) wizType(label, text string) {
+	h.t.Helper()
+	f := h.wizForm()
+	field := f.GetFormItemByLabel(label).(*tview.InputField)
+	h.onUI(func() { h.ui.app.SetFocus(field) })
+	for _, r := range text {
+		h.rune(r)
+	}
+	// Key events are queued separately from UI updates: wait until all
+	// arrived before moving the focus.
+	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+		var got string
+		h.onUI(func() { got = field.GetText() })
+		if got == text {
+			return
+		}
+	}
+	h.t.Fatalf("%s: typed text did not arrive", label)
+}
+
+func TestTUIWizard(t *testing.T) {
+	h := start(t)
+	h.rune('w')
+	h.waitFor("What do you want to back up?")
+	h.key(tcell.KeyEnter, 0) // Files & folders
+	h.waitFor("Which files and folders?")
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, "note.txt"), []byte("hello"), 0o644)
+	h.wizType("Folders (; separated)", src)
+	h.wizClick("Next")
+	h.waitFor("Where should the backups go?")
+	wf := h.wizForm()
+	h.onUI(func() {
+		dd := wf.GetFormItemByLabel("Repository").(*tview.DropDown)
+		dd.SetCurrentOption(dd.GetOptionCount() - 1) // New location…
+	})
+	h.waitFor("Folder for the backups")
+	repo := filepath.Join(t.TempDir(), "repo")
+	h.wizType("Folder for the backups", repo)
+	h.wizClick("Next")
+	h.waitFor("save the password first") // refused until confirmed
+	h.key(tcell.KeyEnter, 0)             // close the message
+	f := h.wizForm()
+	h.onUI(func() { h.ui.app.SetFocus(f.GetFormItemByLabel("I have saved the password")) })
+	h.key(tcell.KeyEnter, 0)
+	pw := h.ui.wiz.plan.Password
+	h.wizClick("Next")
+	h.waitFor("When should it run?")
+	h.wizClick("Next")
+	h.waitFor("How long should backups be kept?")
+	h.wizClick("Next")
+	h.waitFor("Check and create")
+	h.wizClick("Create backup")
+	h.waitFor("is ready")
+	if !strings.Contains(h.text(), pw[:6]) {
+		t.Fatal("the generated password must be shown at the end")
+	}
+	cfg := h.eng.Config()
+	j := cfg.Job("files")
+	rc := cfg.Repo("local")
+	if j == nil || rc == nil || j.Repository != "local" || rc.Location != repo || j.Retention.KeepMonthly != 12 || len(j.Schedules) != 1 {
+		t.Fatalf("job %+v repo %+v", j, rc)
+	}
+	if b, err := os.ReadFile(rc.PasswordFile); err != nil || strings.TrimSpace(string(b)) != pw {
+		t.Fatal("password file:", err)
+	}
+	// The first backup runs right away.
+	for i := 0; i < 200; i++ {
+		if r := h.eng.History().Last("files"); r != nil {
+			if r.Status != "success" {
+				t.Fatalf("first backup: %+v", r)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("first backup did not run")
 }
