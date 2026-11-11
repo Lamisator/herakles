@@ -544,7 +544,7 @@ func (a *webAuth) routes(mux *http.ServeMux) {
 func adminOnly(r *http.Request) bool {
 	p, m := r.URL.Path, r.Method
 	switch {
-	case strings.HasPrefix(p, "/api/users"), strings.HasPrefix(p, "/api/config/yaml"):
+	case strings.HasPrefix(p, "/api/users"), strings.HasPrefix(p, "/api/config/yaml"), p == "/api/wizard/devices":
 		return true
 	case p == "/api/config" && m != http.MethodGet:
 		return true

@@ -11,6 +11,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/lamisator/herakles/internal/blockdev"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/engine"
 	tu "github.com/lamisator/herakles/internal/testutil"
@@ -260,4 +261,36 @@ func TestTUIWizard(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("first backup did not run")
+}
+
+func TestTUIWizardDisk(t *testing.T) {
+	listDevices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{
+			{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Model: "Samsung SSD", Stable: "/dev/disk/by-id/ata-Samsung_SSD_S1"},
+			{Name: "sda1", Path: "/dev/sda1", Type: "part", Size: 1 << 39, Parent: "sda", FSType: "ext4", Mounts: []string{"/data"}, Stable: "/dev/disk/by-id/ata-Samsung_SSD_S1-part1"},
+		}, nil
+	}
+	defer func() { listDevices = blockdev.List }()
+	h := start(t)
+	h.rune('w')
+	h.waitFor("What do you want to back up?")
+	h.key(tcell.KeyDown, 0)
+	h.key(tcell.KeyDown, 0)
+	h.key(tcell.KeyEnter, 0)
+	h.waitFor("Which disk or partition?")
+	h.waitFor("Disk / partition")
+	h.wizClick("Next")
+	h.waitFor("choose a disk or partition") // nothing chosen yet
+	h.key(tcell.KeyEnter, 0)
+	f := h.wizForm()
+	h.onUI(func() { f.GetFormItemByLabel("Disk / partition").(*tview.DropDown).SetCurrentOption(1) })
+	var dev, field string
+	h.onUI(func() {
+		dev, field = h.ui.wiz.plan.Device, f.GetFormItemByLabel("Device").(*tview.InputField).GetText()
+	})
+	if dev != "/dev/disk/by-id/ata-Samsung_SSD_S1-part1" || field != dev {
+		t.Fatalf("device %q, field %q", dev, field)
+	}
+	h.wizClick("Next")
+	h.waitFor("Where should the backups go?")
 }

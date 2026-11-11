@@ -9,9 +9,11 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/lamisator/herakles/internal/blockdev"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/docker"
+	"github.com/lamisator/herakles/internal/ui"
 	"github.com/lamisator/herakles/internal/wizard"
 )
 
@@ -138,15 +140,63 @@ func (w *wiz) what() tview.Primitive {
 
 // ---------- 2 sources ----------
 
+// listDevices is replaced in tests.
+var listDevices = blockdev.List
+
+// diskSources offers the discovered disks and partitions; the field below
+// takes any other device and shows what will be saved in the job.
+func (w *wiz) diskSources() tview.Primitive {
+	f := w.form("Which disk or partition?", func() error {
+		if strings.TrimSpace(w.plan.Device) == "" {
+			return fmt.Errorf("choose a disk or partition")
+		}
+		return nil
+	})
+	devs, err := listDevices()
+	field := tview.NewInputField().SetLabel("Device").SetText(w.plan.Device).SetFieldWidth(60)
+	field.SetChangedFunc(func(t string) { w.plan.Device = strings.TrimSpace(t) })
+	if len(devs) > 0 {
+		depth := map[string]int{}
+		opts, cur := make([]string, 0, len(devs)+1), -1
+		if w.plan.Device != "" {
+			cur = len(devs) // typed by hand
+		}
+		for i, d := range devs {
+			if d.Parent != "" {
+				depth[d.Name] = depth[d.Parent] + 1
+			}
+			opts = append(opts, fmt.Sprintf("%s%s  %s  %s", strings.Repeat("  ", depth[d.Name]), d.Path, ui.Bytes(int64(d.Size)), d.Describe()))
+			if w.plan.Device != "" && (w.plan.Device == d.Path || w.plan.Device == d.Stable) {
+				cur = i
+			}
+		}
+		opts = append(opts, "Other device (type it below)")
+		dd := tview.NewDropDown().SetLabel("Disk / partition").SetOptions(opts, nil)
+		dd.SetCurrentOption(cur)
+		dd.SetSelectedFunc(func(_ string, i int) {
+			if i < len(devs) {
+				field.SetText(devs[i].Best())
+			}
+		})
+		f.AddFormItem(dd)
+	}
+	f.AddFormItem(field)
+	hint := "A whole disk includes the partition table, boot loader and all partitions. " +
+		"The job stores the stable name (/dev/disk/by-id/…), which survives reordered disks. " +
+		"Reading devices needs root (administrator on Windows). Devices marked \"system\" change while they are read."
+	if err != nil {
+		hint = err.Error() + "\ne.g. /dev/sda1, /dev/nvme0n1 or \\\\.\\C: on Windows. Needs root/administrator rights."
+	}
+	f.AddTextView("", hint, 90, 5, true, false)
+	return f
+}
+
 func (w *wiz) sources() tview.Primitive {
 	switch w.plan.Kind {
 	case wizard.Docker:
 		return w.dockerSources()
 	case wizard.Disk:
-		f := w.form("Which disk or partition?", func() error { return nil })
-		f.AddInputField("Device", w.plan.Device, 40, nil, func(t string) { w.plan.Device = t })
-		f.AddTextView("", "e.g. /dev/sda1, /dev/nvme0n1 (lsblk lists them) or \\\\.\\C: on Windows.\nNeeds root/administrator rights.", 60, 3, true, false)
-		return f
+		return w.diskSources()
 	}
 	f := w.form("Which files and folders?", func() error {
 		if len(splitList(w.joinedPaths())) == 0 {

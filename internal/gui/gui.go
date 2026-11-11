@@ -3,6 +3,7 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -16,12 +17,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
@@ -296,6 +300,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/repos/{name}/snapshots/{id}", s.forget)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/tree", s.tree)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/download", s.download)
+	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/preview", s.preview)
+	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/find", s.find)
 	mux.HandleFunc("POST /api/repos/{name}/snapshots/{id}/restore", s.restore)
 	mux.HandleFunc("GET /api/repos/{name}/diff", s.diff)
 	s.dockerRoutes(mux)
@@ -704,6 +710,9 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+// download streams files or directories of a snapshot. Query: path
+// (repeatable; default the whole snapshot) and format (tar, tar.gz, zip;
+// a single file without format is sent as it is).
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	repo, ok := s.open(w, r)
 	if !ok {
@@ -714,25 +723,217 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	node, err := repo.FindNode(r.Context(), snap.Tree, r.URL.Query().Get("path"))
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 {
+		paths = []string{"/"}
+	}
+	format := r.URL.Query().Get("format")
+	if format != "" && !restorer.ValidFormat(format) {
+		s.fail(w, fmt.Errorf("unknown format %q (tar, tar.gz, zip)", format), "")
+		return
+	}
+	// Entries are named relative to the common parent of the selection.
+	parent := commonDir(paths)
+	var items []restorer.Item
+	for _, p := range paths {
+		node, err := repo.FindNode(r.Context(), snap.Tree, p)
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(path.Clean("/"+p), parent), "/")
+		items = append(items, restorer.Item{Name: name, Node: node})
+	}
+	if len(items) == 1 && items[0].Node.Type != repository.NodeDir && format == "" {
+		n := items[0].Node
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprint(n.Size))
+		w.Header().Set("Content-Disposition", attachment(n.Name))
+		_ = restorer.DumpFile(r.Context(), repo, n, w)
+		return
+	}
+	if format == "" {
+		format = restorer.FormatTar
+	}
+	base := ""
+	switch {
+	case len(items) == 1 && items[0].Name != "":
+		base = path.Base(items[0].Name)
+	case len(items) == 1:
+		base = snap.Job
+		if base == "" {
+			base = "snapshot"
+		}
+		base = strings.ReplaceAll(base, "/", "-") + "-" + snap.Time.Local().Format("2006-01-02-1504")
+	default:
+		base = fmt.Sprintf("%s-%d-items", path.Base("/"+parent), len(items))
+		if parent == "/" || parent == "" {
+			base = fmt.Sprintf("snapshot-%s-%d-items", snap.ID().Short(), len(items))
+		}
+	}
+	ct := map[string]string{restorer.FormatTar: "application/x-tar", restorer.FormatTarGz: "application/gzip", restorer.FormatZip: "application/zip"}[format]
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", attachment(base+"."+format))
+	_ = restorer.WriteArchive(r.Context(), repo, items, format, w)
+}
+
+// commonDir returns the deepest directory containing all paths' parents.
+func commonDir(paths []string) string {
+	var common []string
+	for i, p := range paths {
+		parts := strings.Split(strings.Trim(path.Dir(path.Clean("/"+p)), "/"), "/")
+		if i == 0 {
+			common = parts
+			continue
+		}
+		n := 0
+		for n < len(common) && n < len(parts) && common[n] == parts[n] {
+			n++
+		}
+		common = common[:n]
+	}
+	return path.Clean("/" + strings.Join(common, "/"))
+}
+
+// attachment builds a Content-Disposition header that also carries
+// non-ASCII file names.
+func attachment(name string) string {
+	ascii := strings.Map(func(r rune) rune {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' {
+			return '_'
+		}
+		return r
+	}, name)
+	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", ascii, url.PathEscape(name))
+}
+
+// preview shows a file inline: images as they are, text (up to 256 KiB)
+// as plain text. Nothing is executed: the response is sandboxed.
+func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.open(w, r)
+	if !ok {
+		return
+	}
+	defer repo.Close()
+	snap, ok := s.findSnap(w, r, repo)
+	if !ok {
+		return
+	}
+	n, err := repo.FindNode(r.Context(), snap.Tree, r.URL.Query().Get("path"))
 	if err != nil {
 		s.fail(w, err, "")
 		return
 	}
-	name := node.Name
-	if name == "/" {
-		name = "snapshot-" + snap.ID().Short()
-	}
-	if node.Type == repository.NodeDir {
-		w.Header().Set("Content-Type", "application/x-tar")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".tar"))
-		_ = restorer.DumpTar(r.Context(), repo, node, w)
+	if n.Type != repository.NodeFile {
+		s.fail(w, errors.New("only files can be previewed"), "")
 		return
 	}
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprint(node.Size))
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
-	_ = restorer.DumpFile(r.Context(), repo, node, w)
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if ct, ok := previewImages[strings.ToLower(path.Ext(n.Name))]; ok {
+		if n.Size > 20<<20 {
+			s.fail(w, errors.New("the image is too large to preview; download it instead"), "")
+			return
+		}
+		w.Header().Set("Content-Type", ct)
+		_ = restorer.DumpFile(r.Context(), repo, n, w)
+		return
+	}
+	const limit = 256 << 10
+	var buf bytes.Buffer
+	_ = restorer.DumpFile(r.Context(), repo, n, &limitWriter{w: &buf, n: limit})
+	data := buf.Bytes()
+	if bytes.IndexByte(data[:min(len(data), 8192)], 0) >= 0 || !utf8.Valid(trimUTF8(data)) {
+		s.fail(w, errors.New("no preview for binary files; download it instead"), "")
+		return
+	}
+	if n.Size > limit {
+		w.Header().Set("X-Herakles-Truncated", "1")
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+var previewImages = map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".bmp": "image/bmp"}
+
+// trimUTF8 drops a multi-byte character cut off at the end.
+func trimUTF8(b []byte) []byte {
+	for i := 0; i < 3 && len(b) > 0 && !utf8.Valid(b); i++ {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+type limitWriter struct {
+	w io.Writer
+	n int
+}
+
+func (l *limitWriter) Write(p []byte) (int, error) {
+	if l.n <= 0 {
+		return 0, errPreviewFull
+	}
+	q := p
+	if len(q) > l.n {
+		q = q[:l.n]
+	}
+	n, err := l.w.Write(q)
+	l.n -= n
+	if err == nil && len(q) < len(p) {
+		err = errPreviewFull
+	}
+	return len(p), err
+}
+
+var errPreviewFull = errors.New("preview limit reached")
+
+// find searches a snapshot below path for names containing q (or matching
+// q as a glob with * and ?), case-insensitively; at most 500 results.
+func (s *Server) find(w http.ResponseWriter, r *http.Request) {
+	repo, ok := s.open(w, r)
+	if !ok {
+		return
+	}
+	defer repo.Close()
+	snap, ok := s.findSnap(w, r, repo)
+	if !ok {
+		return
+	}
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	if q == "" {
+		s.fail(w, errors.New("enter something to search for"), "")
+		return
+	}
+	glob := strings.ContainsAny(q, "*?")
+	base := path.Clean("/" + r.URL.Query().Get("path"))
+	node, err := repo.FindNode(r.Context(), snap.Tree, base)
+	if err != nil || node.Type != repository.NodeDir || node.Subtree == nil {
+		s.fail(w, fmt.Errorf("%s is not a directory in this snapshot", base), "")
+		return
+	}
+	prefix := strings.TrimSuffix(base, "/")
+	out := []treeEntry{}
+	truncated := false
+	err = repo.Walk(r.Context(), *node.Subtree, func(p string, n *repository.Node) error {
+		name := strings.ToLower(n.Name)
+		match := strings.Contains(name, q)
+		if glob {
+			match, _ = path.Match(q, name)
+		}
+		if match {
+			if len(out) >= 500 {
+				truncated = true
+				return errPreviewFull
+			}
+			out = append(out, treeEntry{Name: n.Name, Path: prefix + p, Type: string(n.Type), Size: n.Size, Mode: n.Mode.String(), MTime: n.ModTime, Link: n.LinkTarget})
+		}
+		return nil
+	})
+	if err != nil && err != errPreviewFull {
+		s.fail(w, err, "")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"results": out, "truncated": truncated})
 }
 
 func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
@@ -747,6 +948,7 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Path      string   `json:"path"`
+		Paths     []string `json:"paths"`
 		Target    string   `json:"target"`
 		Overwrite string   `json:"overwrite"`
 		Verify    bool     `json:"verify"`
@@ -757,23 +959,37 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err, "")
 		return
 	}
-	if req.Path == "" {
-		req.Path = "/"
+	paths := req.Paths
+	if req.Path != "" || len(paths) == 0 {
+		p := req.Path
+		if p == "" {
+			p = "/"
+		}
+		paths = append([]string{p}, paths...)
 	}
 	var errs []string
-	res, err := restorer.Restore(r.Context(), repo, snap, req.Path, restorer.Options{
-		Target: config.ExpandHome(req.Target), Overwrite: req.Overwrite, Verify: req.Verify, Includes: req.Includes, Excludes: req.Excludes,
-		OnError: func(p string, err error) {
-			if len(errs) < 20 {
-				errs = append(errs, p+": "+err.Error())
-			}
-		},
-	})
-	if err != nil {
-		s.fail(w, err, "")
-		return
+	total := &restorer.Result{}
+	for _, p := range paths {
+		res, err := restorer.Restore(r.Context(), repo, snap, p, restorer.Options{
+			Target: config.ExpandHome(req.Target), Overwrite: req.Overwrite, Verify: req.Verify, Includes: req.Includes, Excludes: req.Excludes,
+			OnError: func(p string, err error) {
+				if len(errs) < 20 {
+					errs = append(errs, p+": "+err.Error())
+				}
+			},
+		})
+		if err != nil {
+			s.fail(w, fmt.Errorf("%s: %w", p, err), "")
+			return
+		}
+		total.Files += res.Files
+		total.Dirs += res.Dirs
+		total.Bytes += res.Bytes
+		total.Skipped += res.Skipped
+		total.Errors += res.Errors
+		total.Verified += res.Verified
 	}
-	writeJSON(w, 200, map[string]any{"result": res, "errors": nonNil(errs)})
+	writeJSON(w, 200, map[string]any{"result": total, "errors": nonNil(errs)})
 }
 
 func (s *Server) diff(w http.ResponseWriter, r *http.Request) {

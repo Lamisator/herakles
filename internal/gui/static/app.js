@@ -189,6 +189,7 @@ views.dashboard = async main => {
             h('button', { onclick: () => runJob(j.name, 'incremental') }, 'Incremental'),
             h('button', { onclick: () => runJob(j.name, 'differential') }, 'Differential')],
           h('span', { class: 'spacer' }),
+          !j.docker && last && last.snapshot ? h('button', { class: 'small', onclick: () => openExplorer({ repo: j.repository, snapshot: last.snapshot, job: j.name }) }, 'Browse') : null,
           h('button', { class: 'small', onclick: () => editJob(j.name) }, 'Edit'))));
     }
     clear(activity);
@@ -226,7 +227,7 @@ function renderDaemon(info) {
 // ---------- snapshots ----------
 views.snapshots = async main => {
   const cfg = await loadConfig();
-  main.append(h('h1', {}, 'Snapshots & Restore'), h('div', { class: 'sub' }, 'Browse backups, restore files or whole snapshots, download files, compare snapshots.'));
+  main.append(h('h1', {}, 'Snapshots & Restore'), h('div', { class: 'sub' }, 'Browse backups in the explorer, restore or download files, folders or whole snapshots, compare snapshots.'));
   const repos = cfg.repositories || [];
   if (!repos.length) { main.append(h('div', { class: 'empty' }, 'No repositories configured.')); return; }
   if (!state.snapRepo || !repos.find(r => r.name === state.snapRepo)) state.snapRepo = repos[0].name;
@@ -236,9 +237,8 @@ views.snapshots = async main => {
   state.snapFilter = '';
   const diffBtn = h('button', { disabled: true, onclick: () => diffSelected() }, 'Compare selected');
   const tableBox = h('div');
-  const browser = h('div');
   main.append(h('div', { class: 'toolbar' }, 'Repository', sel, jobFilter, h('span', { class: 'spacer' }), diffBtn,
-    h('button', { onclick: () => load() }, 'Reload')), tableBox, browser);
+    h('button', { onclick: () => load() }, 'Reload')), tableBox);
   let snaps = [];
   const picked = new Set();
   const renderTable = () => {
@@ -253,13 +253,13 @@ views.snapshots = async main => {
         h('td', { class: 'mono' }, s.id.slice(0, 8)), h('td', {}, fmtTime(s.time)), h('td', {}, s.job || '-'), h('td', {}, s.hostname),
         h('td', {}, h('span', { class: 'chip' }, s.type)), h('td', {}, s.summary ? fmtBytes(s.summary.total_bytes) : '-'),
         h('td', {}, s.summary ? fmtBytes(s.summary.bytes_stored) : '-'), h('td', { class: 'wrap' }, (s.paths || []).join(', ')),
-        h('td', {}, h('button', { class: 'small', onclick: () => browse(s, '/') }, 'Browse'), ' ',
-          h('button', { class: 'small', onclick: () => restoreDlg(s, '/') }, 'Restore'), ' ',
+        h('td', { class: 'nowrap' }, h('button', { class: 'small', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: s }) }, 'Browse'), ' ',
+          h('button', { class: 'small', onclick: () => downloadDlg(state.snapRepo, s, ['/']) }, 'Download'), ' ',
+          h('button', { class: 'small', onclick: () => restoreDlg(state.snapRepo, s, ['/']) }, 'Restore'), ' ',
           h('button', { class: 'small danger', onclick: () => forget(s) }, 'Forget'))))));
   };
   const load = async () => {
     clear(tableBox).append(h('div', { class: 'muted' }, 'Loading…'));
-    clear(browser);
     picked.clear(); diffBtn.disabled = true;
     try { snaps = await api('GET', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots'); }
     catch (e) { clear(tableBox).append(h('div', { class: 'empty' }, e.message)); return; }
@@ -269,49 +269,6 @@ views.snapshots = async main => {
     if (!await confirmDlg('Forget snapshot', 'Remove snapshot ' + s.id.slice(0, 8) + ' (' + fmtTime(s.time) + ')? Run prune afterwards to free space.', true)) return;
     try { await api('DELETE', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots/' + s.id); toast('Snapshot forgotten'); load(); }
     catch (e) { toast(e.message, true); }
-  };
-  const browse = async (s, path) => {
-    clear(browser);
-    const base = '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots/' + s.id;
-    let entries;
-    try { entries = await api('GET', base + '/tree?path=' + encodeURIComponent(path)); }
-    catch (e) { toast(e.message, true); return; }
-    const parts = path.split('/').filter(Boolean);
-    const crumbs = h('div', { class: 'crumbs' }, h('a', { onclick: () => browse(s, '/') }, s.id.slice(0, 8)),
-      parts.map((p, i) => [' / ', h('a', { onclick: () => browse(s, '/' + parts.slice(0, i + 1).join('/')) }, p)]));
-    browser.append(h('h2', {}, 'Browse snapshot from ' + fmtTime(s.time)),
-      h('div', { class: 'toolbar' }, crumbs, h('span', { class: 'spacer' }),
-        h('button', { onclick: () => restoreDlg(s, path) }, 'Restore this folder…'),
-        h('a', { class: 'btn', href: base + '/download?path=' + encodeURIComponent(path) }, 'Download as .tar')),
-      h('table', {}, h('tr', {}, ['Name', 'Size', 'Modified', 'Mode', ''].map(t => h('th', {}, t))),
-        path !== '/' ? h('tr', {}, h('td', { colspan: 5 }, h('span', { class: 'entry-name dir', onclick: () => browse(s, '/' + parts.slice(0, -1).join('/')) }, '⬑ ..'))) : null,
-        entries.map(e => h('tr', {},
-          h('td', { class: 'wrap' }, h('span', { class: 'entry-name' + (e.type === 'dir' ? ' dir' : ''), onclick: () => e.type === 'dir' && browse(s, e.path) },
-            (e.type === 'dir' ? '📁 ' : e.type === 'device' ? '💽 ' : e.type === 'symlink' ? '🔗 ' : '📄 ') + e.name + (e.link ? ' → ' + e.link : ''))),
-          h('td', {}, e.type === 'dir' ? '' : fmtBytes(e.size)), h('td', {}, fmtTime(e.mtime)), h('td', { class: 'mono' }, e.mode),
-          h('td', {}, h('button', { class: 'small', onclick: () => restoreDlg(s, e.path) }, 'Restore…'), ' ',
-            h('a', { class: 'btn small', href: base + '/download?path=' + encodeURIComponent(e.path) }, 'Download'))))));
-    browser.scrollIntoView({ behavior: 'smooth' });
-  };
-  const restoreDlg = async (s, path) => {
-    const target = h('input', { value: (state.info && state.info.os === 'windows' ? 'C:\\herakles-restore' : '~/herakles-restore') });
-    const ow = h('select', {}, h('option', { value: 'always' }, 'Overwrite existing files'), h('option', { value: 'if-changed' }, 'Only if different'), h('option', { value: 'never' }, 'Never overwrite'));
-    const inc = h('input', { placeholder: 'e.g. *.pdf; **/Documents' });
-    const verify = h('input', { type: 'checkbox', checked: true });
-    await modal('Restore ' + (path === '/' ? 'snapshot ' + s.id.slice(0, 8) : path), [
-      h('label', {}, 'Target directory (the selected item is restored inside it)'), target,
-      h('label', {}, 'Existing files'), ow,
-      h('label', {}, 'Only restore matching paths (optional, ; separated)'), inc,
-      h('label', { class: 'check' }, verify, 'Verify restored data')], [
-      { label: 'Cancel' },
-      { label: 'Restore', class: 'primary', action: async () => {
-        toast('Restoring…');
-        const r = await api('POST', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots/' + s.id + '/restore',
-          { path, target: target.value, overwrite: ow.value, verify: verify.checked, includes: inc.value.split(';').map(x => x.trim()).filter(Boolean) });
-        const res = r.result;
-        toast('Restored ' + res.files + ' files (' + fmtBytes(res.bytes) + ')' + (res.skipped ? ', skipped ' + res.skipped : '') + (res.errors ? ', ' + res.errors + ' errors' : ''), res.errors > 0);
-        if (r.errors.length) await modal('Restore errors', h('pre', { class: 'mono' }, r.errors.join('\n')), [{ label: 'Close' }]);
-      } }]);
   };
   const diffSelected = async () => {
     const [a, b] = snaps.filter(s => picked.has(s.id)).sort((x, y) => new Date(x.time) - new Date(y.time));
@@ -417,7 +374,8 @@ async function editJob(name) {
     h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Name'), f.name), h('div', {}, h('label', {}, 'Repository'), f.repository)),
     h('label', {}, 'Description'), f.description,
     h('fieldset', {}, h('legend', {}, 'Sources'),
-      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Paths (one per line)'), f.paths), h('div', {}, h('label', {}, 'Disks / partitions as raw images (one per line)'), f.devices))),
+      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Paths (one per line)'), f.paths), h('div', {}, h('label', {}, 'Disks / partitions as raw images (one per line)'), f.devices,
+        h('button', { type: 'button', class: 'small', style: 'margin-top:6px', onclick: async () => { const v = await chooseDevices(unlines(f.devices.value)); if (v) f.devices.value = v.join('\n'); } }, 'Choose disks…')))),
     dock.el,
     h('fieldset', {}, h('legend', {}, 'Exclusions'),
       h('label', {}, 'Exclude patterns (one per line; *.tmp, **/cache, /abs/path)'), f.exclude,
@@ -829,8 +787,8 @@ views.wizard = async main => {
       if (wz.kind === 'disk') {
         return [h('h2', {}, icon('disk'), 'Which disk or partition?'),
           h('div', { class: 'sub' }, 'The device is read block by block; unused space deduplicates to almost nothing. For a consistent image, back up a filesystem that is not being written to (or a snapshot of it).'),
-          h('label', {}, 'Device'), input('device', { placeholder: win ? '\\\\.\\C:   or   \\\\.\\PhysicalDrive0' : '/dev/sda1   or   /dev/nvme0n1' }),
-          h('p', { class: 'muted' }, win ? 'Needs an administrator account.' : 'Needs root. Find device names with lsblk.')];
+          devicePicker({ value: [wz.device], onChange: v => { wz.device = v[0] || ''; } }),
+          h('p', { class: 'muted' }, win ? 'Reading a device needs an administrator account.' : 'Pick a whole disk for a complete image (partition table, boot loader, all partitions) or a single partition.')];
       }
       const ta = h('textarea', { rows: 4, placeholder: win ? 'C:\\Users\\me\\Documents' : '/home/me\n/etc' }, wz.paths);
       ta.addEventListener('input', () => { wz.paths = ta.value; });
@@ -995,7 +953,7 @@ views.wizard = async main => {
     if (step === 'what' && !wz.kind) return 'Choose what to back up';
     if (step === 'sources') {
       if (wz.kind === 'files' && !wz.paths.trim()) return 'Enter at least one folder';
-      if (wz.kind === 'disk' && !wz.device.trim()) return 'Enter the device';
+      if (wz.kind === 'disk' && !wz.device.trim()) return 'Choose a disk or partition';
       if (wz.kind === 'docker') { try { if (!wz.dock.value()) return 'Tick "Back up Docker containers"'; } catch (e) { return e.message; } }
     }
     if (step === 'where' && wz.repoMode === 'new') {
@@ -1123,7 +1081,8 @@ views.containers = async main => {
             h('button', { class: 'primary', disabled: !!run, onclick: () => dockerBackup(j.job, p.name) }, 'Back up now'),
             h('button', { disabled: !!run || !p.snapshots, onclick: () => dockerRestore(j.job, p) }, 'Restore…'),
             h('span', { class: 'spacer' }),
-            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapFilter = unit; navigate('snapshots'); } }, 'Browse'))));
+            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapFilter = unit; navigate('snapshots'); } }, 'Snapshots'),
+            h('button', { class: 'small', disabled: !last, onclick: () => openExplorer({ repo: j.repository, snapshot: last.id, job: unit }) }, 'Browse'))));
       }
     }
   };
@@ -1293,3 +1252,317 @@ async function boot() {
   navigate('dashboard');
 }
 boot();
+
+// ---------- snapshot explorer ----------
+const snapBase = (repo, id) => '/api/repos/' + encodeURIComponent(repo) + '/snapshots/' + id;
+const FORMATS = [['zip', 'ZIP (.zip)'], ['tar.gz', 'Compressed tar (.tar.gz)'], ['tar', 'tar (.tar)']];
+
+function downloadURL(repo, id, paths, format) {
+  const q = paths.map(p => 'path=' + encodeURIComponent(p));
+  if (format) q.push('format=' + encodeURIComponent(format));
+  return snapBase(repo, id) + '/download?' + q.join('&');
+}
+function startDownload(url) {
+  const a = h('a', { href: url, download: '' });
+  document.body.append(a); a.click(); a.remove();
+}
+function formatSelect() {
+  let f = 'zip';
+  try { f = localStorage.getItem('herakles.format') || f; } catch (e) { /* storage blocked */ }
+  return h('select', { style: 'width:auto', onchange: e => { try { localStorage.setItem('herakles.format', e.target.value); } catch (x) { /* ignore */ } } },
+    FORMATS.map(([v, l]) => h('option', { value: v, selected: v === f }, l)));
+}
+
+// downloadDlg asks for the archive format and downloads paths.
+async function downloadDlg(repo, s, paths) {
+  const fmt = formatSelect();
+  const what = paths.length === 1 ? (paths[0] === '/' ? 'the whole snapshot' : paths[0]) : paths.length + ' items';
+  await modal('Download ' + (paths.length === 1 && paths[0] !== '/' ? paths[0].split('/').pop() : 'snapshot ' + s.id.slice(0, 8)), [
+    h('p', {}, 'Download ', h('b', {}, what), ' from the snapshot of ', fmtTime(s.time), ' as an archive.'),
+    h('label', {}, 'Format'), fmt,
+    h('p', { class: 'muted' }, 'ZIP opens everywhere. tar keeps owners and permissions. Large snapshots stream directly from the repository; the size is not known in advance.')], [
+    { label: 'Cancel' },
+    { label: 'Download', class: 'primary', action: () => startDownload(downloadURL(repo, s.id, paths, fmt.value)) }], 'small');
+}
+
+// restoreDlg restores paths of snapshot s.
+async function restoreDlg(repo, s, paths) {
+  const target = h('input', { value: (state.info && state.info.os === 'windows' ? 'C:\\herakles-restore' : '~/herakles-restore') });
+  const ow = h('select', {}, h('option', { value: 'always' }, 'Overwrite existing files'), h('option', { value: 'if-changed' }, 'Only if different'), h('option', { value: 'never' }, 'Never overwrite'));
+  const inc = h('input', { placeholder: 'e.g. *.pdf; **/Documents' });
+  const verify = h('input', { type: 'checkbox', checked: true });
+  const what = paths.length > 1 ? paths.length + ' items' : paths[0] === '/' ? 'snapshot ' + s.id.slice(0, 8) : paths[0];
+  await modal('Restore ' + what, [
+    paths.length > 1 ? h('ul', { class: 'pathlist mono' }, paths.slice(0, 12).map(p => h('li', {}, p)), paths.length > 12 ? h('li', {}, '… and ' + (paths.length - 12) + ' more') : null) : null,
+    h('label', {}, paths.length > 1 ? 'Target directory (the selected items are restored inside it)' : 'Target directory (the selected item is restored inside it)'), target,
+    h('label', {}, 'Existing files'), ow,
+    h('label', {}, 'Only restore matching paths (optional, ; separated)'), inc,
+    h('label', { class: 'check' }, verify, 'Verify restored data')], [
+    { label: 'Cancel' },
+    { label: 'Restore', class: 'primary', action: async () => {
+      toast('Restoring…');
+      const r = await api('POST', snapBase(repo, s.id) + '/restore',
+        { paths, target: target.value, overwrite: ow.value, verify: verify.checked, includes: inc.value.split(';').map(x => x.trim()).filter(Boolean) });
+      const res = r.result;
+      toast('Restored ' + res.files + ' files (' + fmtBytes(res.bytes) + ')' + (res.skipped ? ', skipped ' + res.skipped : '') + (res.errors ? ', ' + res.errors + ' errors' : ''), res.errors > 0);
+      if (r.errors.length) await modal('Restore errors', h('pre', { class: 'mono' }, r.errors.join('\n')), [{ label: 'Close' }]);
+    } }]);
+}
+
+// startPath is the deepest directory containing all backed-up paths.
+function startPath(s) {
+  const ps = (s.paths || []).map(p => p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '/$1')).filter(p => p.startsWith('/'));
+  if (!ps.length) return '/';
+  let common = ps[0].split('/').filter(Boolean);
+  for (const p of ps.slice(1)) {
+    const parts = p.split('/').filter(Boolean);
+    let n = 0;
+    while (n < common.length && n < parts.length && common[n] === parts[n]) n++;
+    common = common.slice(0, n);
+  }
+  return '/' + common.join('/');
+}
+
+const PREVIEW_IMG = /\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i;
+const entryIcon = e => e.type === 'dir' ? 'folder' : e.type === 'symlink' ? 'share' : e.type === 'device' ? 'disk' : PREVIEW_IMG.test(e.name) ? 'eye' : 'file';
+
+// openExplorer shows a snapshot in a file explorer dialog: navigate,
+// search, preview, select, download and restore. opts: {repo, snapshot
+// (object or id), path, job}.
+async function openExplorer(opts) {
+  const repo = opts.repo;
+  let all;
+  try { all = await api('GET', '/api/repos/' + encodeURIComponent(repo) + '/snapshots'); }
+  catch (e) { toast(e.message, true); return; }
+  const want = typeof opts.snapshot === 'string' ? opts.snapshot : opts.snapshot && opts.snapshot.id;
+  let snap = all.find(s => s.id === want || (want && s.id.startsWith(want))) || all.find(s => opts.job && s.job === opts.job);
+  if (!snap) { toast('No snapshot found' + (opts.job ? ' for ' + opts.job : ''), true); return; }
+  const family = all.filter(s => s.job === snap.job && s.hostname === snap.hostname);
+  let path = opts.path || startPath(snap);
+  let entries = [];
+  let mode = 'list'; // or 'search'
+  let sort = { key: 'name', dir: 1 };
+  const selected = new Map(); // path → entry
+  let current = null; // previewed entry
+
+  const snapSel = h('select', { class: 'snap-pick', title: 'Version', onchange: e => { snap = family.find(s => s.id === e.target.value); selected.clear(); go(path, true); } },
+    family.map(s => h('option', { value: s.id, selected: s.id === snap.id }, fmtTime(s.time) + ' · ' + s.type + ' · ' + s.id.slice(0, 8))));
+  const crumbs = h('div', { class: 'crumbs' });
+  const upBtn = h('button', { class: 'small', title: 'Up one folder (Backspace)', onclick: () => go(parent(path)) }, icon('back'), 'Up');
+  const filter = h('input', { type: 'search', placeholder: 'Filter this folder…', oninput: () => render() });
+  const query = h('input', { type: 'search', placeholder: 'Search names below this folder (*.pdf, invoice…)' });
+  query.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+  const listBox = h('div', { class: 'ex-list' });
+  const preview = h('div', { class: 'ex-preview' });
+  const selInfo = h('span', { class: 'muted' });
+  const fmt = formatSelect();
+  const dlSel = h('button', { class: 'primary', onclick: () => downloadSelection() }, 'Download');
+  const rsSel = h('button', { onclick: () => restoreDlg(repo, snap, selPaths()) }, 'Restore…');
+  const title = h('span');
+
+  const root = $('#modal-root');
+  const close = () => { backdrop.remove(); document.removeEventListener('keydown', keys); };
+  const keys = e => {
+    if (root.lastElementChild !== backdrop) return; // a dialog on top has the keys
+    if (e.key === 'Escape') close();
+    else if (e.key === 'Backspace' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && path !== '/') { e.preventDefault(); go(parent(path)); }
+  };
+  document.addEventListener('keydown', keys);
+  const backdrop = h('div', { class: 'modal-backdrop', onmousedown: e => { if (e.target === backdrop) close(); } },
+    h('div', { class: 'modal explorer' },
+      h('header', {}, icon('browse'), title, h('span', { class: 'spacer' }), snapSel,
+        h('button', { class: 'small ghost', title: 'Close (Esc)', onclick: close }, icon('cancel'))),
+      h('div', { class: 'ex-bar' }, upBtn, crumbs),
+      h('div', { class: 'ex-bar' }, filter, query, h('button', { class: 'small', onclick: () => search() }, icon('eye'), 'Search')),
+      h('div', { class: 'ex-main' }, listBox, preview),
+      h('footer', {}, selInfo, h('span', { class: 'spacer' }), fmt, dlSel, rsSel, h('button', { onclick: close }, 'Close'))));
+  root.append(backdrop);
+
+  const relName = e => {
+    const dir = e.path.slice(0, e.path.length - e.name.length).slice(path === '/' ? 1 : path.length + 1);
+    return h('span', { class: 'ex-rel' }, h('span', {}, e.name), dir ? h('small', { class: 'muted' }, dir.replace(/\/$/, '') || '/') : null);
+  };
+  const parent = p => '/' + p.split('/').filter(Boolean).slice(0, -1).join('/');
+  const selPaths = () => selected.size ? [...selected.keys()] : [path];
+  const downloadSelection = () => {
+    const ps = selPaths();
+    const single = ps.length === 1 && selected.size === 1 && [...selected.values()][0].type === 'file';
+    startDownload(downloadURL(repo, snap.id, ps, single ? '' : fmt.value));
+  };
+  const updateFooter = () => {
+    let bytes = 0, dirs = 0;
+    selected.forEach(e => { if (e.type === 'dir') dirs++; else bytes += e.size || 0; });
+    selInfo.textContent = selected.size ? selected.size + ' selected' + (bytes ? ' · ' + fmtBytes(bytes) : '') + (dirs ? ' · ' + dirs + ' folder' + (dirs > 1 ? 's' : '') : '')
+      : 'Nothing selected: the buttons act on the current folder';
+    dlSel.lastChild.textContent = selected.size ? 'Download selection' : 'Download folder';
+    rsSel.lastChild.textContent = selected.size ? 'Restore selection…' : 'Restore folder…';
+    const single = selected.size === 1 && [...selected.values()][0].type === 'file';
+    fmt.disabled = single;
+    fmt.title = single ? 'A single file is downloaded as it is' : '';
+  };
+  const go = async (p, keep) => {
+    mode = 'list';
+    listBox.classList.add('loading');
+    try {
+      entries = await api('GET', snapBase(repo, snap.id) + '/tree?path=' + encodeURIComponent(p));
+      path = p;
+    } catch (e) {
+      if (keep && p !== '/') { toast(p + ' is not in this version; showing the top folder'); return go('/'); }
+      toast(e.message, true);
+      listBox.classList.remove('loading');
+      return;
+    }
+    listBox.classList.remove('loading');
+    filter.value = '';
+    title.textContent = (snap.job || 'Snapshot') + ' · ' + fmtTime(snap.time);
+    const parts = path.split('/').filter(Boolean);
+    clear(crumbs).append(h('a', { onclick: () => go('/') }, icon('archive'), snap.id.slice(0, 8)),
+      ...parts.flatMap((x, i) => [h('span', { class: 'sep' }, '/'), h('a', { onclick: () => go('/' + parts.slice(0, i + 1).join('/')) }, x)]));
+    upBtn.disabled = path === '/';
+    render();
+  };
+  const search = async () => {
+    const q = query.value.trim();
+    if (!q) { go(path); return; }
+    listBox.classList.add('loading');
+    try {
+      const r = await api('GET', snapBase(repo, snap.id) + '/find?q=' + encodeURIComponent(q) + '&path=' + encodeURIComponent(path));
+      entries = r.results;
+      mode = 'search';
+      clear(crumbs).append(h('a', { onclick: () => { query.value = ''; go(path); } }, icon('back'), path),
+        h('span', { class: 'sep' }, '·'), h('span', {}, r.results.length + (r.truncated ? '+' : '') + ' results for “' + q + '”'));
+    } catch (e) { toast(e.message, true); }
+    listBox.classList.remove('loading');
+    render();
+  };
+  const sorted = () => {
+    const f = filter.value.toLowerCase();
+    const list = entries.filter(e => !f || e.name.toLowerCase().includes(f));
+    const k = sort.key;
+    return list.sort((a, b) => {
+      if ((a.type === 'dir') !== (b.type === 'dir')) return a.type === 'dir' ? -1 : 1;
+      let x = k === 'size' ? (a.size || 0) - (b.size || 0) : k === 'mtime' ? new Date(a.mtime) - new Date(b.mtime) : (k === 'path' ? a.path : a.name).localeCompare(k === 'path' ? b.path : b.name, undefined, { numeric: true, sensitivity: 'base' });
+      return x * sort.dir;
+    });
+  };
+  const render = () => {
+    const list = sorted();
+    const allSel = list.length && list.every(e => selected.has(e.path));
+    const head = (label, key) => h('th', { class: 'sortable' + (sort.key === key ? ' on' : ''), onclick: () => { sort = { key, dir: sort.key === key ? -sort.dir : 1 }; render(); } },
+      label, sort.key === key ? (sort.dir > 0 ? ' ▲' : ' ▼') : '');
+    const toggle = (e, on) => { on ? selected.set(e.path, e) : selected.delete(e.path); updateFooter(); };
+    clear(listBox).append(h('table', {},
+      h('tr', {}, h('th', { class: 'cb' }, h('input', { type: 'checkbox', title: 'Select all', checked: allSel, onchange: ev => { list.forEach(e => toggle(e, ev.target.checked)); render(); } })),
+        head('Name', mode === 'search' ? 'path' : 'name'), head('Size', 'size'), head('Modified', 'mtime'), h('th', {}, 'Mode')),
+      !list.length ? h('tr', {}, h('td', { colspan: 5, class: 'muted' }, mode === 'search' ? 'Nothing found.' : entries.length ? 'No entry matches the filter.' : 'This folder is empty.')) : null,
+      list.map(e => h('tr', { class: (selected.has(e.path) ? 'sel' : '') + (current && current.path === e.path ? ' cur' : ''), ondblclick: () => open(e) },
+        h('td', { class: 'cb' }, h('input', { type: 'checkbox', checked: selected.has(e.path), onchange: ev => { toggle(e, ev.target.checked); ev.target.closest('tr').classList.toggle('sel', ev.target.checked); } })),
+        h('td', { class: 'wrap' }, h('span', { class: 'entry-name' + (e.type === 'dir' ? ' dir' : ''), onclick: () => open(e) }, icon(entryIcon(e)),
+          mode === 'search' ? relName(e) : e.name, e.link ? h('span', { class: 'muted' }, ' → ' + e.link) : null)),
+        h('td', { class: 'num' }, e.type === 'dir' ? '' : fmtBytes(e.size)), h('td', {}, fmtTime(e.mtime)), h('td', { class: 'mono' }, e.mode)))));
+    updateFooter();
+  };
+  const open = e => {
+    if (e.type === 'dir') { query.value = ''; go(e.path); return; }
+    showPreview(e);
+    render();
+  };
+  const showPreview = async e => {
+    current = e;
+    const url = snapBase(repo, snap.id) + '/preview?path=' + encodeURIComponent(e.path);
+    const body = h('div', { class: 'ex-pv-body' }, h('div', { class: 'muted' }, 'Loading…'));
+    clear(preview).append(
+      h('div', { class: 'ex-pv-head' }, icon(entryIcon(e)), h('b', { class: 'wrap' }, e.name), h('span', { class: 'spacer' }),
+        h('button', { class: 'small ghost', title: 'Close preview', onclick: () => { current = null; clear(preview); preview.classList.remove('on'); render(); } }, icon('cancel'))),
+      h('div', { class: 'meta' }, fmtBytes(e.size), ' · ', fmtTime(e.mtime), ' · ', h('span', { class: 'mono' }, e.mode)),
+      h('div', { class: 'meta mono wrap' }, e.path),
+      h('div', { class: 'actions' },
+        h('button', { class: 'small primary', onclick: () => startDownload(downloadURL(repo, snap.id, [e.path], '')) }, 'Download'),
+        h('button', { class: 'small', onclick: () => restoreDlg(repo, snap, [e.path]) }, 'Restore…')),
+      body);
+    preview.classList.add('on');
+    if (e.type !== 'file') { clear(body).append(h('div', { class: 'muted' }, e.link ? 'Symbolic link to ' + e.link : 'No preview for this type.')); return; }
+    if (PREVIEW_IMG.test(e.name)) { clear(body).append(h('img', { src: url, alt: e.name, onerror: () => clear(body).append(h('div', { class: 'muted' }, 'The image cannot be shown.')) })); return; }
+    try {
+      const res = await fetch(url, { headers: { 'X-Herakles': '1' } });
+      const text = await res.text();
+      if (current !== e) return;
+      if (!res.ok) { let m = text; try { m = JSON.parse(text).error; } catch (x) { /* plain */ } clear(body).append(h('div', { class: 'muted' }, m)); return; }
+      clear(body).append(h('pre', { class: 'ex-text' }, text));
+      if (res.headers.get('X-Herakles-Truncated')) body.append(h('div', { class: 'muted' }, 'Only the first 256 KiB are shown.'));
+    } catch (x) { clear(body).append(h('div', { class: 'muted' }, x.message)); }
+  };
+  await go(path, true);
+}
+
+// ---------- disks & partitions ----------
+const DEV_KIND = { disk: 'Disk', part: 'Partition', lvm: 'LVM volume', crypt: 'Encrypted volume', raid: 'RAID', dm: 'Mapped volume', volume: 'Volume' };
+
+// devicePicker lists the disks and partitions of this computer for image
+// backups, with a field for any other device. opts: {multi, value (paths),
+// onChange(paths)}. Jobs store the stable path (/dev/disk/by-id/…).
+function devicePicker(opts) {
+  const win = state.info && state.info.os === 'windows';
+  const chosen = new Set((opts.value || []).filter(Boolean));
+  const list = h('div', { class: 'dev-pick' }, h('div', { class: 'muted' }, 'Looking for disks and partitions…'));
+  const manual = h(opts.multi ? 'textarea' : 'input', { rows: opts.multi ? 2 : null, placeholder: win ? '\\\\.\\C:   or   \\\\.\\PhysicalDrive0' : '/dev/sdb1   or   /dev/disk/by-id/…' });
+  const el = h('div', {}, list, h('label', {}, opts.multi ? 'Other devices (one per line)' : 'Other device'), manual);
+  let devs = [];
+  const known = p => devs.some(d => d.path === p || d.stable === p);
+  const emit = () => {
+    const extra = manual.value.split('\n').map(x => x.trim()).filter(Boolean);
+    opts.onChange(opts.multi ? [...chosen, ...extra.filter(x => !chosen.has(x))] : extra.length ? [extra[0]] : [...chosen].slice(0, 1));
+  };
+  manual.addEventListener('input', () => {
+    if (!opts.multi && manual.value.trim()) { chosen.clear(); list.querySelectorAll('input').forEach(i => { i.checked = false; }); list.querySelectorAll('.dev-row').forEach(r => r.classList.remove('on')); }
+    emit();
+  });
+  const render = () => {
+    clear(list);
+    if (!devs.length) return;
+    const depth = {};
+    for (const d of devs) {
+      depth[d.name] = d.parent && depth[d.parent] !== undefined ? depth[d.parent] + 1 : 0;
+      const key = d.stable || d.path;
+      const on = chosen.has(d.path) || chosen.has(key);
+      if (on && chosen.has(d.path) && key !== d.path) { chosen.delete(d.path); chosen.add(key); }
+      const box = h('input', { type: opts.multi ? 'checkbox' : 'radio', name: 'dev-pick', checked: on });
+      const row = h('label', { class: 'dev-row' + (on ? ' on' : '') + (d.system ? ' system' : ''), style: 'margin-left:' + depth[d.name] * 22 + 'px' },
+        box, icon(d.usb ? 'usb' : d.type === 'crypt' ? 'lock' : d.type === 'lvm' || d.type === 'raid' ? 'repos' : 'disk', 'dev-ico'),
+        h('div', { class: 'dev-main' },
+          h('div', {}, h('b', { class: 'mono' }, d.path), ' ', h('span', { class: 'muted' }, fmtBytes(d.size)), ' ',
+            h('span', { class: 'chip' }, (d.usb ? 'USB ' : '') + (DEV_KIND[d.type] || d.type)),
+            d.system ? h('span', { class: 'chip warn', title: 'This device holds the running system and changes while it is read. Prefer a file backup, or image it from a rescue system.' }, 'system') : null,
+            d.read_only ? h('span', { class: 'chip' }, 'read-only') : null),
+          h('div', { class: 'meta' }, [d.model, d.fstype === 'swap' && (d.mounts || []).includes('[SWAP]') ? '' : d.fstype ? d.fstype + (d.label ? ' “' + d.label + '”' : '') : d.label ? '“' + d.label + '”' : '',
+            (d.mounts || []).filter(m => m !== '[SWAP]').length ? 'mounted at ' + d.mounts.filter(m => m !== '[SWAP]').join(', ') : (d.mounts || []).includes('[SWAP]') ? 'swap in use' : ''].filter(Boolean).join(' · ') || ' '),
+          key !== d.path ? h('div', { class: 'meta mono dev-stable', title: 'Saved in the job under this name, which stays the same when disks are added or reordered' }, '↳ ' + key) : null));
+      box.addEventListener('change', () => {
+        if (!opts.multi) { chosen.clear(); list.querySelectorAll('.dev-row').forEach(r => r.classList.remove('on')); manual.value = ''; }
+        box.checked ? chosen.add(key) : chosen.delete(key);
+        row.classList.toggle('on', box.checked);
+        emit();
+      });
+      list.append(row);
+    }
+  };
+  api('GET', '/api/wizard/devices').then(r => {
+    devs = r.devices || [];
+    const others = [...chosen].filter(p => !known(p));
+    others.forEach(p => chosen.delete(p));
+    manual.value = others.join('\n');
+    if (r.error || !devs.length) { clear(list).append(h('div', { class: 'muted' }, r.error || 'No disks found. Enter the device name below.')); return; }
+    render();
+    if (!r.root && !win) list.append(h('p', { class: 'muted' }, icon('info'), ' Reading a device needs root: run the daemon (or the backup) as root.'));
+  }).catch(e => { clear(list).append(h('div', { class: 'muted' }, e.message)); manual.value = [...chosen].join('\n'); });
+  return el;
+}
+
+async function chooseDevices(current) {
+  let picked = current;
+  const ok = await modal('Choose disks and partitions', [
+    h('p', { class: 'muted' }, 'Each device is backed up as a raw image; unused space deduplicates to almost nothing.'),
+    devicePicker({ multi: true, value: current, onChange: v => { picked = v; } })], [
+    { label: 'Cancel', value: false }, { label: 'Use selection', class: 'primary', value: true }]);
+  return ok ? picked : null;
+}

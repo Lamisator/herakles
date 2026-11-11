@@ -82,7 +82,7 @@ const BUTTON_ICONS = [
   [/^Prune$/, 'prune'], [/^Statistics$/, 'stats'], [/^Initialize$/, 'init'], [/^Unlock$/, 'unlock'], [/^Cancel$/, 'cancel'],
   [/^(Save|Validate & save)/, 'save'], [/^Compare/, 'compare'], [/^Show annotated/, 'eye'], [/^Sign in with a passkey|^Add a passkey/, 'passkey'],
   [/^Create backup|^Create job|^Finish/, 'done'], [/^Next$|^Continue$/, 'next'], [/^Back$/, 'back'], [/^Get started|^Start the wizard|^Backup wizard/, 'wizard'],
-  [/^Confirm$/, 'done'],
+  [/^Confirm$|^Use selection$/, 'done'], [/^Choose disks/, 'disk'], [/^Search$/, 'eye'],
 ];
 
 function decorate(root) {
@@ -91,7 +91,11 @@ function decorate(root) {
     if (b.querySelector('.ico')) return;
     const label = b.textContent.trim();
     const hit = BUTTON_ICONS.find(([re]) => re.test(label));
-    if (hit) b.prepend(icon(hit[1]));
+    if (!hit) return;
+    // "+ Add …" gets the plus pictogram instead of the character.
+    const t = b.firstChild;
+    if (hit[1] === 'plus' && t && t.nodeType === 3 && t.nodeValue.startsWith('+ ')) t.nodeValue = t.nodeValue.slice(2);
+    b.prepend(icon(hit[1]));
   });
   root.querySelectorAll('h1:not([data-ico])').forEach(h => {
     h.dataset.ico = '1';

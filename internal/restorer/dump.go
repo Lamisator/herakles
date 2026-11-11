@@ -1,12 +1,9 @@
 package restorer
 
 import (
-	"archive/tar"
 	"context"
 	"fmt"
 	"io"
-	"path"
-	"strings"
 
 	"github.com/lamisator/herakles/internal/archiver"
 	"github.com/lamisator/herakles/internal/id"
@@ -25,54 +22,6 @@ func DumpFile(ctx context.Context, repo *repository.Repository, n *repository.No
 		}
 	}
 	return nil
-}
-
-// DumpTar writes a node (file or directory) as a tar stream to w.
-func DumpTar(ctx context.Context, repo *repository.Repository, n *repository.Node, w io.Writer) error {
-	tw := tar.NewWriter(w)
-	write := func(name string, n *repository.Node) error {
-		hdr := &tar.Header{Name: name, Mode: int64(n.Mode.Perm()), ModTime: n.ModTime, Uid: int(n.UID), Gid: int(n.GID), Uname: n.User, Gname: n.Group}
-		switch n.Type {
-		case repository.NodeDir:
-			hdr.Typeflag, hdr.Name = tar.TypeDir, name+"/"
-		case repository.NodeSymlink:
-			hdr.Typeflag, hdr.Linkname = tar.TypeSymlink, n.LinkTarget
-		case repository.NodeFile, repository.NodeDevice:
-			hdr.Typeflag, hdr.Size = tar.TypeReg, int64(n.Size)
-		case repository.NodeFIFO:
-			hdr.Typeflag = tar.TypeFifo
-		default:
-			return nil
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
-		if hdr.Typeflag == tar.TypeReg {
-			return DumpFile(ctx, repo, n, tw)
-		}
-		return nil
-	}
-	base := n.Name
-	if base == "/" {
-		base = "."
-	}
-	if n.Type != repository.NodeDir {
-		if err := write(base, n); err != nil {
-			return err
-		}
-		return tw.Close()
-	}
-	if base != "." {
-		if err := write(base, n); err != nil {
-			return err
-		}
-	}
-	if err := repo.Walk(ctx, *n.Subtree, func(p string, c *repository.Node) error {
-		return write(path.Join(base, strings.TrimPrefix(p, "/")), c)
-	}); err != nil {
-		return err
-	}
-	return tw.Close()
 }
 
 // Change is one entry of a snapshot diff.

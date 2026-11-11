@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/lamisator/herakles/internal/blockdev"
 	"github.com/lamisator/herakles/internal/docker"
 )
 
@@ -44,6 +45,15 @@ func (s *Server) wizardRoutes(mux *http.ServeMux) {
 		}
 		out["suggested_paths"] = suggest
 		writeJSON(w, 200, out)
+	})
+	// Disks and partitions for device backups.
+	mux.HandleFunc("GET /api/wizard/devices", func(w http.ResponseWriter, r *http.Request) {
+		devs, err := blockdev.List()
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"devices": []blockdev.Device{}, "error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"devices": devs, "root": os.Geteuid() == 0})
 	})
 	// Store a repository password in a file next to the configuration
 	// (mode 0600) and return its path for password_file.

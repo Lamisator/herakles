@@ -31,7 +31,7 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | **Client/server (optional)** | HTTPS repository server with bcrypt users, per‑user repository ACLs, **append‑only mode** (protects against ransomware deleting backups), quotas and a self‑signed certificate generator. The server never sees plaintext or keys. |
 | **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** and has a token‑protected local control API. |
 | **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index from pack headers. Restores can be verified. Interrupted backups resume (indexes are written periodically). |
-| **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and download from the GUI. |
+| **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and the GUI **explorer** (preview, search, multi-select) with downloads as ZIP, tar.gz or tar. |
 | **Docker** | A `docker:` section makes a job back up every Compose project (and standalone container) as its own snapshot `JOB/PROJECT`: project directory, bind mounts, named volumes (also of stopped projects) and dumps of Postgres, MySQL/MariaDB and MongoDB. Projects can be stopped during their backup instead. `herakles docker restore` stops the project, restores everything, starts it and loads the dumps into fresh databases, with automatic rollback. |
 | **Web interface** | The daemon can serve the GUI on the network: accounts with Argon2id passwords and passkeys, roles (admin, user), no public sign-up (one-time setup link for the first administrator). |
 | **Extras** | Pre/post/success/failure hooks, notifications (webhook, e‑mail, command), `copy` of snapshots between repositories (3‑2‑1 replication), JSON output for scripting, run history. |
@@ -169,7 +169,7 @@ Every command has `--help` with examples. `--json` gives machine‑readable outp
 
 ### Backup wizard
 
-**New backup** in the GUI (also *Get started* on an empty dashboard and *Backup wizard* on the jobs page) and `w` in the terminal UI lead through: what to back up (files and folders, Docker containers, a disk or partition) → sources (with suggested folders, exclusion presets and the Docker project picker) → where (an existing repository or a new one on a local/USB disk, SMB share, SFTP server or Herakles server, with a generated or chosen password stored next to the configuration with mode 0600, or asked for each time) → when (schedule presets) → how long (retention presets) → name and summary. The wizard creates and initialises the repository, saves the job and can start the first backup.
+**New backup** in the GUI (also *Get started* on an empty dashboard and *Backup wizard* on the jobs page) and `w` in the terminal UI lead through: what to back up (files and folders, Docker containers, a disk or partition) → sources (with suggested folders, exclusion presets, the Docker project picker, or the discovered disks and partitions) → where (an existing repository or a new one on a local/USB disk, SMB share, SFTP server or Herakles server, with a generated or chosen password stored next to the configuration with mode 0600, or asked for each time) → when (schedule presets) → how long (retention presets) → name and summary. The wizard creates and initialises the repository, saves the job and can start the first backup.
 
 ### Terminal UI — `herakles tui`
 
@@ -186,7 +186,8 @@ A full‑screen curses‑style interface with five tabs (keys `1`–`5` or `F1`�
 The GUI is served only on `127.0.0.1` and protected by a random session token, CSRF and DNS‑rebinding checks. It opens in a Chromium/Edge **app window** (no browser chrome) or falls back to the default browser. It needs no extra runtime on Linux or Windows and is fully embedded in the binary.
 
 * **Dashboard**: job cards with Back up now / Full / Incremental / Differential, live progress, daemon status and next run.
-* **Snapshots & Restore**: filter, browse, restore (target, overwrite policy, include filter, verify), download files or folders (tar), compare two snapshots, forget.
+* **Snapshots & Restore**: filter, compare two snapshots, forget; **Download** a whole snapshot as ZIP, tar.gz or tar; **Browse** opens the explorer.
+* **Explorer** (from Snapshots, the dashboard and container cards): breadcrumbs, a version switcher for the same job, sortable columns, filter, name search below the current folder (`invoice`, `*.pdf`), preview of text files and images, multi-select across folders; download the selection (a single file as it is, anything else as ZIP, tar.gz or tar) or restore it. `Backspace` goes up, `Esc` closes.
 * **Backup Jobs**: full editor for sources, exclusions, schedules (with presets), retention, hooks and retries.
 * **Repositories**: add/edit (local, SMB, SFTP, server), encryption/password source, key file, bandwidth limits, maintenance schedules, initialize, check, prune, statistics.
 * **Configuration**: YAML editor that keeps comments. **Activity Log**: history and messages.
@@ -311,6 +312,8 @@ herakles backup --repo offsite --device /dev/sda1        # or a job with `device
 herakles restore-device latest:/dev/sda1 --repo offsite --to /dev/sdb1 --force
 herakles restore latest:/dev/sda1 --target /tmp          # → /tmp/sda1 image file (sparse)
 ```
+
+`herakles devices` lists disks, partitions and LVM/LUKS/RAID volumes with size, model, file system, label and mount points, and the **stable path** (`/dev/disk/by-id/…`) that survives reordered disks; the wizard (GUI and TUI) and the job editor (**Choose disks…**) offer the same list. Devices that hold the running system are marked *system*.
 
 Herakles images the device content block by block, so unused (zero) areas deduplicate and compress to almost nothing. For consistent images, back up unmounted or read‑only filesystems, or LVM/ZFS/btrfs snapshots created in a `before` hook.
 

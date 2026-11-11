@@ -171,7 +171,7 @@ func TestWebAuth(t *testing.T) {
 	if !strings.Contains(raw, tu.Password.Password) {
 		t.Fatal("admins see the full configuration")
 	}
-	for _, req := range [][2]string{{"PUT", "/api/config"}, {"GET", "/api/config/yaml"}, {"GET", "/api/users"}, {"POST", "/api/repos/vault/init"}, {"DELETE", "/api/repos/vault/snapshots/abcd"}} {
+	for _, req := range [][2]string{{"PUT", "/api/config"}, {"GET", "/api/config/yaml"}, {"GET", "/api/users"}, {"POST", "/api/repos/vault/init"}, {"DELETE", "/api/repos/vault/snapshots/abcd"}, {"GET", "/api/wizard/devices"}} {
 		if code, _, _ := u.do(req[0], req[1], map[string]any{}); code != 403 {
 			t.Fatalf("user may not %s %s: %d", req[0], req[1], code)
 		}

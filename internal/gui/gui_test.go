@@ -2,12 +2,15 @@ package gui
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,16 +173,66 @@ func TestBackupBrowseRestoreDownload(t *testing.T) {
 		t.Fatalf("download: %d %q", code, data)
 	}
 	code, data = c.do("GET", "/api/repos/vault/snapshots/"+sid+"/download?path="+src+"/sub", nil)
-	tr := tar.NewReader(bytes.NewReader(data))
-	n := 0
-	for {
-		if _, err := tr.Next(); err != nil {
-			break
-		}
-		n++
-	}
+	n := countTar(bytes.NewReader(data))
 	if code != 200 || n < 4 {
 		t.Fatalf("tar download: %d entries", n)
+	}
+	// zip and tar.gz of a selection; names relative to the common parent.
+	q := "/api/repos/vault/snapshots/" + sid + "/download?path=" + url.QueryEscape(src+"/small.txt") + "&path=" + url.QueryEscape(src+"/sub/deeper")
+	code, data = c.do("GET", q+"&format=zip", nil)
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if code != 200 || err != nil {
+		t.Fatalf("zip: %d %v", code, err)
+	}
+	got := map[string]bool{}
+	for _, f := range zr.File {
+		got[f.Name] = true
+	}
+	if !got["small.txt"] || !got["sub/deeper/"] || !got["sub/deeper/text.md"] || len(got) != 3 {
+		t.Fatalf("zip entries: %v", got)
+	}
+	code, data = c.do("GET", q+"&format=tar.gz", nil)
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if code != 200 || err != nil {
+		t.Fatalf("tar.gz: %d %v", code, err)
+	}
+	if n := countTar(gz); n != 3 {
+		t.Fatalf("tar.gz entries: %d", n)
+	}
+	if code, _ := c.do("GET", q+"&format=rar", nil); code == 200 {
+		t.Fatal("unknown format accepted")
+	}
+	// Preview: text yes, binary no.
+	code, data = c.do("GET", "/api/repos/vault/snapshots/"+sid+"/preview?path="+src+"/small.txt", nil)
+	if code != 200 || string(data) != "hello herakles\n" {
+		t.Fatalf("preview: %d %q", code, data)
+	}
+	if code, _ := c.do("GET", "/api/repos/vault/snapshots/"+sid+"/preview?path="+src+"/big.bin", nil); code == 200 {
+		t.Fatal("binary previewed")
+	}
+	// Find by substring and glob.
+	var found struct {
+		Results []treeEntry
+	}
+	c.json("GET", "/api/repos/vault/snapshots/"+sid+"/find?q=DUP&path="+url.QueryEscape(src), nil, &found)
+	if len(found.Results) != 2 {
+		t.Fatalf("find: %+v", found)
+	}
+	c.json("GET", "/api/repos/vault/snapshots/"+sid+"/find?q=*.md&path="+url.QueryEscape(src), nil, &found)
+	if len(found.Results) != 1 || found.Results[0].Path != src+"/sub/deeper/text.md" {
+		t.Fatalf("find glob: %+v", found)
+	}
+	// Restore of a selection.
+	sel := filepath.Join(t.TempDir(), "sel")
+	var sres struct{ Result struct{ Files int64 } }
+	if code := c.json("POST", "/api/repos/vault/snapshots/"+sid+"/restore", map[string]any{"paths": []string{src + "/small.txt", src + "/sub/deeper"}, "target": sel}, &sres); code != 200 || sres.Result.Files != 2 {
+		t.Fatalf("selection restore: %d %+v", code, sres)
+	}
+	if b, err := os.ReadFile(filepath.Join(sel, "small.txt")); err != nil || string(b) != "hello herakles\n" {
+		t.Fatal("restored selection:", err)
+	}
+	if _, err := os.Stat(filepath.Join(sel, "deeper", "text.md")); err != nil {
+		t.Fatal("restored selection:", err)
 	}
 	target := filepath.Join(t.TempDir(), "out")
 	var res struct {
@@ -286,5 +339,16 @@ func TestAutostartOption(t *testing.T) {
 	}
 	if _, err := os.Stat(entry); !os.IsNotExist(err) {
 		t.Fatal("saving YAML with autostart: false left the entry")
+	}
+}
+
+func countTar(r io.Reader) int {
+	tr := tar.NewReader(r)
+	n := 0
+	for {
+		if _, err := tr.Next(); err != nil {
+			return n
+		}
+		n++
 	}
 }

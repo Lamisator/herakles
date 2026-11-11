@@ -364,8 +364,16 @@ herakles daemon stop | restart | service-status | uninstall</pre>
 
 <h2 id="restore">Finding and restoring</h2>
 <h3>In the desktop interface</h3>
-<p>Under <strong>Snapshots &amp; Restore</strong>, pick a repository, click <strong>Browse</strong> on a snapshot and walk through its folders. <strong>Restore…</strong> restores a file or folder (choose the target folder, what to do with existing files, an optional filter and verification); <strong>Download</strong> saves a file, or a folder as <code>.tar</code>. Tick two snapshots and click <strong>Compare selected</strong> to see what changed.</p>
-<figure class="frame"><img src="img/snapshots.webp" width="1600" height="1000" loading="lazy" alt="Snapshot browser"></figure>
+<p>Under <strong>Snapshots &amp; Restore</strong>, pick a repository and click <strong>Browse</strong> on a snapshot (or <strong>Browse</strong> on a job card on the dashboard or on a container card) to open the <strong>explorer</strong>:</p>
+<ul>
+  <li>Walk through folders with the breadcrumbs, <strong>Up</strong> or <kbd>Backspace</kbd>; sort by name, size or date; filter the current folder.</li>
+  <li>Switch between <strong>versions</strong> of the same job in the header; the explorer stays in the same folder if it exists there.</li>
+  <li><strong>Search</strong> finds names below the current folder, by part of the name (<code>invoice</code>) or a pattern (<code>*.pdf</code>).</li>
+  <li>Click a file to <strong>preview</strong> it: text files (first 256 KiB) and images.</li>
+  <li>Tick files and folders, also across folders, then <strong>Download selection</strong> or <strong>Restore selection…</strong>. A single file downloads as it is; everything else as <strong>ZIP</strong>, <strong>tar.gz</strong> or <strong>tar</strong> (tar keeps owners and permissions). With nothing ticked, the buttons act on the current folder.</li>
+</ul>
+<p><strong>Download</strong> on a snapshot row saves the whole snapshot as an archive. <strong>Restore…</strong> asks for the target folder, what to do with existing files, an optional filter and verification. Tick two snapshots and click <strong>Compare selected</strong> to see what changed.</p>
+<figure class="frame"><img src="img/explorer.webp" width="1600" height="1000" loading="lazy" alt="Snapshot explorer with three items selected and a text preview"></figure>
 <h3>On the command line</h3>
 <pre>herakles snapshots                               <span class="c"># all snapshots (--job, --host, --tag filter)</span>
 herakles ls latest /home/alex -l                 <span class="c"># list a folder of the newest snapshot</span>
@@ -401,7 +409,15 @@ herakles dump latest:/home/alex/projects --tar &gt; projects.tar</pre>
 sudo herakles restore-device latest:/dev/sda1 --repo offsite --to /dev/sdb1 --force
 herakles restore-device 2939cbe7:/dev/nvme0n1p2 --to /tmp/root.img     <span class="c"># into an image file</span>
 herakles restore latest:/dev/sda1 --target /tmp                        <span class="c"># → /tmp/sda1 (sparse image)</span></pre>
-<p>On Windows, use <code>\\.\C:</code> for a volume or <code>\\.\PhysicalDrive0</code> for a disk, from an administrator terminal.</p>
+<p>You don't need to look up device names: the wizard (GUI and terminal UI) and the job editor (<strong>Choose disks…</strong>) list the disks, partitions and LVM, LUKS or RAID volumes with size, model, file system, label and mount point. <code>herakles devices</code> prints the same list:</p>
+<pre>$ herakles devices
+DEVICE                      SIZE        DESCRIPTION                                   STABLE PATH
+/dev/sda                    931.51 GiB  disk · Samsung SSD 870 · system               /dev/disk/by-id/ata-Samsung_SSD_870_S5X…
+  /dev/sda1                 512.00 MiB  partition · vfat "EFI" · /boot/efi · system   /dev/disk/by-id/ata-Samsung_SSD_870_S5X…-part1
+  /dev/sda2                 931.00 GiB  partition · ext4 · / · system                 /dev/disk/by-id/ata-Samsung_SSD_870_S5X…-part2
+/dev/sdb                    28.90 GiB   USB disk · SanDisk Ultra Fit                  /dev/disk/by-id/usb-SanDisk_Ultra_Fit_4C53…
+  /dev/sdb1                 28.90 GiB   partition · exfat "STICK"                     /dev/disk/by-id/usb-SanDisk_Ultra_Fit_4C53…-part1</pre>
+<p>Jobs store the <strong>stable path</strong>: <code>/dev/sdb1</code> can become <code>/dev/sdc1</code> after a reboot or when another disk is plugged in, the <code>by-id</code> name cannot. Devices marked <em>system</em> hold the running system (/, /boot, swap) and change while they are read. On Windows the list shows <code>\\.\C:</code> volumes and <code>\\.\PhysicalDrive0</code> disks; reading them needs an administrator terminal.</p>
 <div class="note"><p><strong>Consistency:</strong> an image of a mounted, changing file system can be inconsistent. Back up unmounted or read-only file systems, or create an LVM, ZFS or btrfs snapshot in a <a href="#hooks"><code>before</code> hook</a> and image that. <code>--force</code> is required to overwrite a block device, and the target must not be mounted.</p></div>
 
 <h2 id="server">Repository server</h2>
@@ -645,7 +661,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
          docker | web | config | daemon | server | tui | gui | tray | version</pre>
 <p>Global options: <code>-c/--config</code>, <code>-r/--repo</code> (a repository name or a location), <code>--password-file</code>, <code>--key-file</code>, <code>--no-prompt</code>, <code>--json</code> (machine-readable output), <code>-q</code>, <code>-v</code>. Exit codes: <code>0</code> success, <code>1</code> error, <code>3</code> backup finished but some files could not be read. Shell completion: <code>herakles completion bash|zsh|fish|powershell</code>.</p>
 <h3>Backup wizard</h3>
-<p>In the GUI under <strong>New backup</strong>, in the terminal UI with <kbd>w</kbd> on the dashboard. Steps: <em>What</em> (files and folders, Docker containers, a disk or partition) → <em>Sources</em> (suggested folders, presets to leave out caches, build folders, downloads; the Docker project picker) → <em>Where</em> (an existing repository, or a new one on a local or USB disk, an SMB share, an SFTP server or a Herakles server; the encryption password is generated and shown once, chosen, or asked for each time) → <em>When</em> (every night, weekly full with daily incremental, every 4 hours, manual) → <em>How long</em> (one week, standard, long, everything) → <em>Finish</em> (name, summary, start the first backup). Stored passwords go into <code>&lt;repository&gt;.password</code> next to the configuration with mode 0600.</p>
+<p>In the GUI under <strong>New backup</strong>, in the terminal UI with <kbd>w</kbd> on the dashboard. Steps: <em>What</em> (files and folders, Docker containers, a disk or partition) → <em>Sources</em> (suggested folders, presets to leave out caches, build folders, downloads; the Docker project picker; the discovered disks and partitions) → <em>Where</em> (an existing repository, or a new one on a local or USB disk, an SMB share, an SFTP server or a Herakles server; the encryption password is generated and shown once, chosen, or asked for each time) → <em>When</em> (every night, weekly full with daily incremental, every 4 hours, manual) → <em>How long</em> (one week, standard, long, everything) → <em>Finish</em> (name, summary, start the first backup). Stored passwords go into <code>&lt;repository&gt;.password</code> next to the configuration with mode 0600.</p>
 <h3>Terminal UI: <code>herakles tui</code></h3>
 <p>A full-screen interface for terminals and SSH sessions, with five tabs (keys <kbd>1</kbd>–<kbd>5</kbd> or <kbd>F1</kbd>–<kbd>F5</kbd>):</p>
 <ol>
