@@ -9,7 +9,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func statCTime(st *syscall.Stat_t) time.Time { return time.Unix(st.Ctim.Sec, st.Ctim.Nsec).UTC() }
+func statCTime(st *syscall.Stat_t) time.Time {
+	return time.Unix(int64(st.Ctim.Sec), int64(st.Ctim.Nsec)).UTC() //nolint:unconvert // int32 on 32-bit
+}
 
 func deviceSize(f *os.File) (int64, error) {
 	var size uint64
