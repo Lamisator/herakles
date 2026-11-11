@@ -162,7 +162,7 @@ func (a *App) configSetCmd() *cobra.Command {
 	repo := &cobra.Command{
 		Use:     "repo NAME LOCATION",
 		Short:   "Add or replace a repository definition",
-		Example: "  herakles config set repo local /mnt/backup --password-file /etc/herakles/pw\n  herakles config set repo nas smb://user@nas/share/herakles --yaml 'remote: {password_env: NAS_PW}'",
+		Example: "  herakles config set repo local /mnt/backup --password-file-path /etc/herakles/pw\n  herakles config set repo nas smb://user@nas/share/herakles --yaml 'remote: {password_env: NAS_PW}'",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nr := r
