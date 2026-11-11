@@ -4,3 +4,7 @@
 *.test
 *.out
 coverage.*
+
+# Credentials: never commit
+.storage_creds
+id_ssh
