@@ -5,6 +5,7 @@
 It ships as a single static binary for Linux and Windows. That one binary contains:
 
 * a command line interface (`herakles …`),
+* a backup wizard in the GUI and the terminal UI that sets up a complete job step by step,
 * a curses‑style terminal UI (`herakles tui`),
 * a graphical desktop UI (`herakles gui`),
 * a tray icon that runs the daemon and the GUI on your desktop (`herakles tray`),
@@ -166,6 +167,10 @@ herakles init | backup | jobs | snapshots | ls | find | diff | restore | restore
 
 Every command has `--help` with examples. `--json` gives machine‑readable output. Exit codes: `0` ok, `1` error, `3` backup finished but some files could not be read.
 
+### Backup wizard
+
+**New backup** in the GUI (also *Get started* on an empty dashboard and *Backup wizard* on the jobs page) and `w` in the terminal UI lead through: what to back up (files and folders, Docker containers, a disk or partition) → sources (with suggested folders, exclusion presets and the Docker project picker) → where (an existing repository or a new one on a local/USB disk, SMB share, SFTP server or Herakles server, with a generated or chosen password stored next to the configuration with mode 0600, or asked for each time) → when (schedule presets) → how long (retention presets) → name and summary. The wizard creates and initialises the repository, saves the job and can start the first backup.
+
 ### Terminal UI — `herakles tui`
 
 A full‑screen curses‑style interface with five tabs (keys `1`–`5` or `F1`–`F5`):
@@ -244,6 +249,8 @@ jobs:
 ```
 
 Without `projects` and `folders` every project on the host is backed up. `folders` includes every project whose directory lies inside one of them (for standalone containers: one of their bind mounts), so projects created later are picked up automatically; folders are also searched (three levels deep) for project directories whose containers do not exist. Everything else in the folders (files that belong to no project) goes into the job's own snapshot, so nothing in them is missed and nothing is stored twice. `projects` adds projects by name or glob, `exclude_projects` always wins. In the GUI job editor you tick the projects on the host (and per project whether it is stopped during its backup); on the command line use `config set job NAME --docker-folder /srv --docker-project wiki --docker-exclude portainer --docker-stop zammad`.
+
+A project's own directory is the Compose directory, grown to the closest common parent of its bind mounts when that is still a directory of its own (inside a configured folder and containing no other project). Bitwarden, for example, keeps its compose file in `bwdata/docker` and mounts `bwdata/core`, `bwdata/mssql`, …: the whole `bwdata` (with `config.yml` and `env/`) belongs to the project. A bind mount that contains other projects (a deploy tool mounting `/srv/docker`) is left out of the project, and an in-place restore that would replace another project is refused.
 
 Projects are discovered from the Compose container labels. Each project gets its own snapshot `containers/<project>` holding the project directory, bind mounts outside it, its named volumes (by mount and by Compose label, so stopped projects keep theirs), `docker inspect` output and logical dumps of its Postgres, MySQL/MariaDB and MongoDB containers (taken while running; database containers without a server, such as backup sidecars, are skipped). Retention and history work per project.
 

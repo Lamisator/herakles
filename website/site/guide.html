@@ -97,6 +97,9 @@ herakles version</pre>
 
 <h2 id="quick-start">Quick start</h2>
 <h3 id="qs-gui">With the desktop interface</h3>
+<p>The quickest way is the <strong>backup wizard</strong>: start the interface and click <strong>New backup</strong> (or <em>Get started</em> on the empty dashboard). It asks six things — what, sources, where, when, how long, name — and then creates the repository, saves the job and starts the first backup. The terminal UI has the same wizard on the key <kbd>w</kbd>.</p>
+<figure class="frame"><img src="img/wizard.webp" width="1600" height="1000" loading="lazy" alt="Backup wizard: choose what to back up"></figure>
+<p>Or set it up by hand:</p>
 <ol>
   <li>Start Herakles in the tray and open its window:
 <pre>herakles tray --open</pre>
@@ -494,6 +497,7 @@ services:
 <tr><td><code>exclude_projects: [portainer]</code></td><td>Always left out.</td></tr>
 <tr><td><code>stop: [zammad]</code></td><td>Stopped during their backup instead of dumping their databases.</td></tr>
 </table>
+<p>A project's own directory is its Compose directory, grown to the closest common parent of its bind mounts if that is still a directory of its own (inside a configured folder, containing no other project). Bitwarden keeps its compose file in <code>bwdata/docker</code> and mounts <code>bwdata/core</code>, <code>bwdata/mssql</code> and others: the whole <code>bwdata</code>, including <code>config.yml</code> and <code>env/</code>, belongs to the project. A bind mount that contains other projects (such as a deploy tool mounting <code>/srv/docker</code>) is left out of that project, and an in-place restore that would replace another project is refused.</p>
 <p>In the GUI, open <strong>Backup Jobs → New job</strong> (or Edit), tick <strong>Back up Docker containers</strong> and choose <em>All projects on this host</em> or <em>Only the projects I choose</em>. The editor lists every project on the host: tick the ones to back up, and per project whether it is stopped during its backup; folders you enter are applied right away (their projects show an “in /srv” tag). On the command line:</p>
 <pre>herakles config set job containers --repository nas --docker-folder /srv \
     --docker-project wiki --docker-exclude portainer --docker-stop zammad \
@@ -640,6 +644,8 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
          forget | prune | check | stats | copy | key | unlock | repair index
          docker | web | config | daemon | server | tui | gui | tray | version</pre>
 <p>Global options: <code>-c/--config</code>, <code>-r/--repo</code> (a repository name or a location), <code>--password-file</code>, <code>--key-file</code>, <code>--no-prompt</code>, <code>--json</code> (machine-readable output), <code>-q</code>, <code>-v</code>. Exit codes: <code>0</code> success, <code>1</code> error, <code>3</code> backup finished but some files could not be read. Shell completion: <code>herakles completion bash|zsh|fish|powershell</code>.</p>
+<h3>Backup wizard</h3>
+<p>In the GUI under <strong>New backup</strong>, in the terminal UI with <kbd>w</kbd> on the dashboard. Steps: <em>What</em> (files and folders, Docker containers, a disk or partition) → <em>Sources</em> (suggested folders, presets to leave out caches, build folders, downloads; the Docker project picker) → <em>Where</em> (an existing repository, or a new one on a local or USB disk, an SMB share, an SFTP server or a Herakles server; the encryption password is generated and shown once, chosen, or asked for each time) → <em>When</em> (every night, weekly full with daily incremental, every 4 hours, manual) → <em>How long</em> (one week, standard, long, everything) → <em>Finish</em> (name, summary, start the first backup). Stored passwords go into <code>&lt;repository&gt;.password</code> next to the configuration with mode 0600.</p>
 <h3>Terminal UI: <code>herakles tui</code></h3>
 <p>A full-screen interface for terminals and SSH sessions, with five tabs (keys <kbd>1</kbd>–<kbd>5</kbd> or <kbd>F1</kbd>–<kbd>F5</kbd>):</p>
 <ol>
