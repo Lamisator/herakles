@@ -53,7 +53,7 @@ label.check input { width: auto; }
 table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); background: var(--panel); }
-td.wrap { white-space: normal; word-break: break-all; }
+td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 18ch; }
 tr:hover td { background: rgba(127,127,127,.05); }
 tr.selected td { background: rgba(47,111,222,.08); }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
