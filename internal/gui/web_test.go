@@ -76,12 +76,15 @@ func setupWeb(t *testing.T) (*Server, *httptest.Server, *engine.Engine, *dockert
 		ConfigFiles: []string{filepath.Join(wd, "compose.yml")}, Running: true,
 		Mounts: []docker.Mount{{Type: "bind", Source: filepath.Join(wd, "pg"), Destination: "/var/lib/postgresql/data"}}})
 	os.MkdirAll(filepath.Join(wd, "pg"), 0o700)
+	// A project directory without containers (e.g. an archived stack).
+	os.MkdirAll(filepath.Join(dir, "srv", "archived"), 0o755)
+	os.WriteFile(filepath.Join(dir, "srv", "archived", "compose.yml"), []byte("services: {}\n"), 0o644)
 	cfg := config.New(filepath.Join(dir, "h.yaml"))
 	cfg.StateDir = filepath.Join(dir, "state")
 	cfg.Daemon.ControlListen = "127.0.0.1:1"
 	rc := &config.Repository{Name: "vault", Location: filepath.Join(dir, "repo"), Password: tu.Password.Password}
 	cfg.Repositories = []*config.Repository{rc}
-	cfg.Jobs = []*config.Job{{Name: "containers", Repository: "vault", Docker: &config.DockerJob{Binary: fake.Bin}}}
+	cfg.Jobs = []*config.Job{{Name: "containers", Repository: "vault", Docker: &config.DockerJob{Binary: fake.Bin, ScanDirs: []string{filepath.Join(dir, "srv")}}}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -234,10 +237,13 @@ func TestWebDocker(t *testing.T) {
 
 	var jobs []dockerJobView
 	_, _, raw := c.do("GET", "/api/docker", nil)
-	if err := json.Unmarshal([]byte(raw), &jobs); err != nil || len(jobs) != 1 || len(jobs[0].Projects) != 1 {
+	if err := json.Unmarshal([]byte(raw), &jobs); err != nil || len(jobs) != 1 || len(jobs[0].Projects) != 2 {
 		t.Fatal(raw)
 	}
-	p := jobs[0].Projects[0]
+	if !strings.Contains(raw, `"name":"archived"`) || strings.Contains(raw, `"containers":null`) {
+		t.Fatal("projects without containers must have an empty list, not null:", raw)
+	}
+	p := jobs[0].Projects[1]
 	if p.Name != "wiki" || p.Mode != "dump" || p.Running != 1 || p.Last != nil {
 		t.Fatalf("%+v", p)
 	}

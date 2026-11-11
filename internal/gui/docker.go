@@ -230,7 +230,7 @@ func (s *Server) dockerList(w http.ResponseWriter, r *http.Request) {
 			last = h
 		}
 		for _, p := range ps {
-			pv := projectView{Name: p.Name, Standalone: p.Standalone, WorkingDir: p.WorkingDir, Running: p.Running(), Containers: p.Containers}
+			pv := projectView{Name: p.Name, Standalone: p.Standalone, WorkingDir: p.WorkingDir, Running: p.Running(), Containers: nonNil(p.Containers)}
 			for _, c := range p.Containers {
 				if k, ok := docker.DetectDB(c); ok {
 					pv.Databases = append(pv.Databases, c.Name+" ("+string(k)+")")

@@ -516,7 +516,7 @@ function dockerPicker(j) {
         return h('tr', {}, h('td', {}, cb),
           h('td', {}, h('b', {}, p.name), p.standalone ? h('span', { class: 'chip' }, 'standalone') : null, via ? h('span', { class: 'chip' }, 'in ' + via) : null,
             h('div', { class: 'meta mono' }, p.working_dir || (p.dirs || []).join(', '))),
-          h('td', {}, p.containers.length ? p.running + '/' + p.containers.length + ' running' : 'directory only',
+          h('td', {}, (p.containers || []).length ? p.running + '/' + p.containers.length + ' running' : 'directory only',
             p.databases && p.databases.length ? h('div', { class: 'meta' }, p.databases.join(', ')) : null),
           h('td', {}, st));
       })));
@@ -1112,7 +1112,7 @@ views.containers = async main => {
             run ? badge('running') : badge(res ? res.status : (last ? 'success' : null))),
           p.working_dir ? h('div', { class: 'meta mono' }, p.working_dir) : null,
           h('div', {}, (p.containers || []).map(c => h('div', { class: 'container-row' }, h('span', { class: 'dot' + (c.running ? ' on' : '') }), c.name, ' · ', c.image))),
-          !p.containers.length ? h('div', { class: 'meta' }, 'no containers (project directory only)') : null,
+          !(p.containers || []).length ? h('div', { class: 'meta' }, 'no containers (project directory only)') : null,
           h('div', { class: 'meta' }, (p.databases && p.databases.length ? 'Databases: ' + p.databases.join(', ') + ' · ' : '') +
             { dump: 'dumped while running', stop: 'stopped during backup', files: 'files only' }[p.mode]),
           h('div', { class: 'meta' }, 'Last backup: ', last ? ago(last.time) + ' (' + last.type + (last.summary ? ', ' + fmtBytes(last.summary.total_bytes) : '') + ') · ' + p.snapshots + ' snapshots' : 'never'),
