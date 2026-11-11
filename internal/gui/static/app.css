@@ -108,3 +108,44 @@ button.wide { width: 100%; margin-top: 14px; padding: 10px; justify-content: cen
 .dock-list table { box-shadow: none; }
 fieldset { min-width: 0; }
 .dock-list td { white-space: normal; overflow-wrap: anywhere; }
+
+/* pictograms */
+.ico { display: inline-flex; width: 1.15em; height: 1.15em; vertical-align: -0.22em; flex-shrink: 0; }
+.ico svg { width: 100%; height: 100%; }
+button .ico, .btn .ico { margin-right: 6px; }
+button.small .ico { margin-right: 4px; }
+nav a { display: flex; align-items: center; gap: 11px; }
+nav a .ico { width: 18px; height: 18px; opacity: .8; }
+nav a.active .ico { opacity: 1; color: var(--accent); }
+h1 .ico.title { width: .95em; height: .95em; margin-right: 10px; color: var(--accent); vertical-align: -0.1em; }
+.empty .ico.big { display: block; width: 46px; height: 46px; margin: 0 auto 12px; color: var(--muted); opacity: .6; }
+.card h3 .ico { color: var(--accent-2); }
+.sub .ico { color: var(--muted); }
+
+/* backup wizard */
+.wiz-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 20px; }
+.wiz-step { display: flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); color: var(--muted); font-size: 12.5px; }
+.wiz-step .ico { width: 15px; height: 15px; }
+.wiz-step.active { border-color: var(--accent-2); color: var(--text); font-weight: 600; box-shadow: 0 0 0 3px rgba(47,111,222,.12); }
+.wiz-step.done { color: var(--ok); border-color: rgba(31,157,85,.35); }
+.wiz-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow); max-width: 1000px; }
+.wiz-card > h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font-size: 20px; }
+.wiz-card > h2 .ico { width: 26px; height: 26px; color: var(--accent); }
+.wiz-card > .sub { margin-bottom: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 12px; margin: 12px 0 6px; }
+.tile { border: 2px solid var(--border); border-radius: 12px; padding: 16px; cursor: pointer; background: var(--panel); text-align: left; display: flex; flex-direction: column; gap: 6px; color: var(--text); }
+.tile:hover { border-color: var(--accent-2); }
+.tile.sel { border-color: var(--accent-2); background: rgba(47,111,222,.07); box-shadow: 0 0 0 3px rgba(47,111,222,.12); }
+.tile > .ico { width: 34px; height: 34px; color: var(--accent-2); margin: 0 0 4px; }
+.tile b { font-size: 15px; }
+.tile .d { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.wiz-nav { display: flex; gap: 8px; margin-top: 22px; align-items: center; }
+.summary-row { display: flex; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+.summary-row:last-child { border-bottom: 0; }
+.summary-row > .ico { width: 24px; height: 24px; color: var(--accent-2); margin-top: 2px; }
+.summary-row .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+.pw-box { font-family: ui-monospace, Consolas, monospace; font-size: 15px; padding: 10px 12px; background: var(--bg); border: 1px dashed var(--accent); border-radius: 8px; user-select: all; overflow-wrap: anywhere; }
+.chips-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chips-pick button { border-radius: 999px; font-size: 12.5px; padding: 3px 10px; }
+.wiz-done { text-align: center; padding: 30px 10px; }
+.wiz-done > .ico { width: 64px; height: 64px; color: var(--ok); display: block; margin: 0 auto 10px; }

@@ -548,7 +548,7 @@ func adminOnly(r *http.Request) bool {
 		return true
 	case p == "/api/config" && m != http.MethodGet:
 		return true
-	case strings.HasPrefix(p, "/api/repos/") && (strings.HasSuffix(p, "/init") || strings.HasSuffix(p, "/task/prune")):
+	case strings.HasPrefix(p, "/api/repos/") && (strings.HasSuffix(p, "/init") || strings.HasSuffix(p, "/task/prune") || strings.HasSuffix(p, "/password-file")):
 		return true
 	case strings.HasPrefix(p, "/api/repos/") && strings.Contains(p, "/snapshots/") && m == http.MethodDelete:
 		return true
@@ -559,7 +559,7 @@ func adminOnly(r *http.Request) bool {
 // publicPath can be fetched without a login.
 func publicPath(p string) bool {
 	switch p {
-	case "/login.html", "/login.js", "/app.css", "/favicon.svg":
+	case "/login.html", "/login.js", "/icons.js", "/app.css", "/favicon.svg":
 		return true
 	}
 	return strings.HasPrefix(p, "/auth/")

@@ -164,7 +164,7 @@ views.dashboard = async main => {
     clear(jobsEl);
     if (!jobs.length) {
       jobsEl.append(h('div', { class: 'empty' }, 'No backup jobs yet. ',
-        h('button', { class: 'primary', onclick: () => navigate(state.config && state.config.repositories && state.config.repositories.length ? 'jobs' : 'repos') }, 'Get started')));
+        h('button', { class: 'primary', onclick: () => navigate('wizard') }, 'Get started')));
     }
     for (const j of jobs) {
       const run = active['backup:' + j.name];
@@ -172,7 +172,7 @@ views.dashboard = async main => {
       const sched = (j.schedule || []).map(s => h('span', { class: 'chip' }, s.cron + ' · ' + (s.type || 'auto')));
       const next = info.daemon ? (info.daemon.schedule || []).find(e => e.kind === 'backup' && e.target === j.name) : null;
       jobsEl.append(h('div', { class: 'card' },
-        h('h3', {}, j.name, run ? badge('running') : badge(last && last.status), j.disabled ? h('span', { class: 'chip' }, 'disabled') : null),
+        h('h3', {}, icon(j.docker ? 'containers' : (j.devices || []).length ? 'disk' : 'folder'), j.name, run ? badge('running') : badge(last && last.status), j.disabled ? h('span', { class: 'chip' }, 'disabled') : null),
         j.description ? h('div', { class: 'meta' }, j.description) : null,
         h('div', { class: 'meta' }, '→ ', j.repository, ' · ', [...(j.docker ? ['Docker projects'] : []), ...(j.paths || []), ...(j.devices || [])].join(', ')),
         h('div', { class: 'meta' }, 'Last run: ', last ? ago(last.start) + ' (' + last.type + ')' : 'never',
@@ -329,7 +329,8 @@ views.snapshots = async main => {
 views.jobs = async main => {
   const cfg = await loadConfig();
   main.append(h('h1', {}, 'Backup Jobs'), h('div', { class: 'sub' }, 'What to back up, where to, when, and how long to keep it.'),
-    h('div', { class: 'toolbar' }, h('button', { class: 'primary', onclick: () => editJob(null) }, '+ New job')));
+    h('div', { class: 'toolbar' }, h('button', { class: 'primary', onclick: () => navigate('wizard') }, 'Backup wizard'),
+      h('button', { onclick: () => editJob(null) }, '+ New job')));
   const jobs = cfg.jobs || [];
   if (!jobs.length) { main.append(h('div', { class: 'empty' }, 'No jobs defined.')); return; }
   main.append(h('table', {}, h('tr', {}, ['Job', 'Repository', 'Sources', 'Schedule', 'Retention', ''].map(t => h('th', {}, t))),
@@ -774,6 +775,312 @@ views.logs = async main => {
   state.timer = setInterval(() => render().catch(() => {}), 3000);
 };
 
+// ---------- backup wizard ----------
+const WIZ_STEPS = [
+  { id: 'what', title: 'What', icon: 'sparkle' }, { id: 'sources', title: 'Sources', icon: 'folder' },
+  { id: 'where', title: 'Where', icon: 'repos' }, { id: 'when', title: 'When', icon: 'clock' },
+  { id: 'keep', title: 'How long', icon: 'retention' }, { id: 'finish', title: 'Finish', icon: 'done' }];
+
+function tile(iconName, title, desc, selected, onclick) {
+  return h('button', { type: 'button', class: 'tile' + (selected ? ' sel' : ''), 'data-ico': '1', onclick }, icon(iconName), h('b', {}, title), desc ? h('span', { class: 'd' }, desc) : null);
+}
+function genPassword() {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const r = crypto.getRandomValues(new Uint32Array(24));
+  return Array.from(r, x => abc[x % abc.length]).join('').replace(/(.{6})(?!$)/g, '$1-');
+}
+
+views.wizard = async main => {
+  const [info, cfg] = await Promise.all([api('GET', '/api/wizard/info'), loadConfig()]);
+  const repos = cfg.repositories || [];
+  const jobs = cfg.jobs || [];
+  const win = info.os === 'windows';
+  const wz = {
+    step: 0, kind: '', paths: '', excl: { caches: true, build: false, downloads: false }, oneFS: false, customExcl: '', device: '',
+    repoMode: repos.length ? 'existing' : 'new', repo: repos.length ? repos[0].name : '', type: 'local',
+    loc: { path: '', host: '', share: '', dir: 'herakles', user: '', pass: '', identity: '', url: '', srvRepo: info.hostname || 'backup', ca: '' },
+    repoName: '', pwMode: 'generate', password: genPassword(), pw1: '', pw2: '', saved: false, maintenance: true,
+    schedule: 'nightly', time: '02:00', keep: 'standard', name: '', description: '', runNow: true, autostart: false, dock: null,
+  };
+  main.append(h('h1', {}, 'New backup'), h('div', { class: 'sub' }, 'This wizard sets up a complete backup job step by step: what to back up, where to, when, and for how long.'));
+  const stepsEl = h('div', { class: 'wiz-steps' });
+  const card = h('div', { class: 'wiz-card' });
+  main.append(stepsEl, card);
+  const uniqueName = base => { let n = base, i = 2; while (jobs.some(j => j.name === n) || repos.some(r => r.name === n && base !== n)) n = base + '-' + i++; return n; };
+  const uniqueRepo = base => { let n = base, i = 2; while (repos.some(r => r.name === n)) n = base + '-' + i++; return n; };
+
+  const input = (key, attrs, obj) => { obj = obj || wz; const el = h('input', Object.assign({ value: obj[key] || '' }, attrs || {})); el.addEventListener('input', () => { obj[key] = el.type === 'checkbox' ? el.checked : el.value; }); return el; };
+  const check = (key, label, obj) => { obj = obj || wz; const el = h('input', { type: 'checkbox', checked: !!obj[key], onchange: e => { obj[key] = e.target.checked; } }); return h('label', { class: 'check' }, el, label); };
+
+  const steps = {
+    what: () => [h('h2', {}, icon('sparkle'), 'What do you want to back up?'), h('div', { class: 'sub' }, 'You can add more jobs later; every job has its own schedule.'),
+      h('div', { class: 'tiles' },
+        tile('folder', 'Files & folders', 'Documents, home directories, server data. Permissions and timestamps are kept.', wz.kind === 'files', () => pick('files')),
+        tile('containers', 'Docker containers', info.docker ? info.docker_projects + ' projects found on this host. Each one is backed up and restored on its own, databases included.' : 'Docker Compose projects with volumes and database dumps. (Docker was not found on this computer.)', wz.kind === 'docker', () => pick('docker')),
+        tile('disk', 'A whole disk or partition', 'An image for disaster recovery that can be written back to a disk.', wz.kind === 'disk', () => pick('disk')))],
+
+    sources: () => {
+      if (wz.kind === 'docker') {
+        if (!wz.dock) wz.dock = dockerPicker({ name: '', docker: {} });
+        return [h('h2', {}, icon('containers'), 'Which containers?'),
+          h('div', { class: 'sub' }, 'Choose all projects, pick them one by one, or name folders (such as /srv) whose projects — including future ones — are backed up automatically. Files in those folders that belong to no project are backed up too.'),
+          wz.dock.el];
+      }
+      if (wz.kind === 'disk') {
+        return [h('h2', {}, icon('disk'), 'Which disk or partition?'),
+          h('div', { class: 'sub' }, 'The device is read block by block; unused space deduplicates to almost nothing. For a consistent image, back up a filesystem that is not being written to (or a snapshot of it).'),
+          h('label', {}, 'Device'), input('device', { placeholder: win ? '\\\\.\\C:   or   \\\\.\\PhysicalDrive0' : '/dev/sda1   or   /dev/nvme0n1' }),
+          h('p', { class: 'muted' }, win ? 'Needs an administrator account.' : 'Needs root. Find device names with lsblk.')];
+      }
+      const ta = h('textarea', { rows: 4, placeholder: win ? 'C:\\Users\\me\\Documents' : '/home/me\n/etc' }, wz.paths);
+      ta.addEventListener('input', () => { wz.paths = ta.value; });
+      const add = p => { const cur = ta.value.split('\n').map(x => x.trim()).filter(Boolean); if (!cur.includes(p)) cur.push(p); ta.value = wz.paths = cur.join('\n'); };
+      const ex = h('textarea', { rows: 2, placeholder: '*.iso\n**/big-files' }, wz.customExcl);
+      ex.addEventListener('input', () => { wz.customExcl = ex.value; });
+      return [h('h2', {}, icon('folder'), 'Which files and folders?'), h('div', { class: 'sub' }, 'One folder or file per line. Everything below a folder is included.'),
+        h('div', { class: 'chips-pick' }, (info.suggested_paths || []).map(p => h('button', { type: 'button', onclick: () => add(p) }, '+ ' + p))), ta,
+        h('label', {}, 'Leave out'),
+        check('caches', 'Caches and temporary files (.cache, *.tmp, folders marked with CACHEDIR.TAG)', wz.excl),
+        check('build', 'Build and dependency folders (node_modules, target, .venv, __pycache__)', wz.excl),
+        check('downloads', 'Downloads and trash', wz.excl),
+        check('oneFS', 'Stay on one file system (skip mounted disks and network shares below the folders)'),
+        h('label', {}, 'More patterns to leave out (optional, one per line)'), ex];
+    },
+
+    where: () => {
+      const typeFields = () => {
+        const L = wz.loc;
+        switch (wz.type) {
+          case 'local': return [h('label', {}, 'Folder for the backups'), input('path', { placeholder: win ? 'D:\\Backups\\herakles' : '/mnt/usb-disk/herakles' }, L),
+            h('p', { class: 'muted' }, 'A folder on another disk: an external USB disk, a second internal disk, or a mounted network share (NFS, SMB). The folder is created if needed.')];
+          case 'smb': return [h('div', { class: 'row' }, h('div', {}, h('label', {}, 'NAS / server'), input('host', { placeholder: 'nas.local' }, L)), h('div', {}, h('label', {}, 'Share'), input('share', { placeholder: 'backups' }, L))),
+            h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Folder in the share'), input('dir', {}, L)), h('div', {}, h('label', {}, 'User name'), input('user', { placeholder: 'backup' }, L))),
+            h('label', {}, 'Password of the share account'), input('pass', { type: 'password', autocomplete: 'new-password' }, L),
+            h('p', { class: 'muted' }, 'Herakles talks SMB itself — no need to mount the share.')];
+          case 'sftp': return [h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Server'), input('host', { placeholder: 'backup.example.com' }, L)), h('div', {}, h('label', {}, 'User name'), input('user', { placeholder: 'backup' }, L))),
+            h('label', {}, 'Folder on the server'), input('dir', { placeholder: '/srv/herakles' }, L),
+            h('label', {}, 'SSH key (optional; ssh-agent and ~/.ssh keys are used otherwise)'), input('identity', { placeholder: '~/.ssh/id_ed25519' }, L)];
+          case 'server': return [h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Herakles server'), input('url', { placeholder: 'backup.example.com:8443' }, L)), h('div', {}, h('label', {}, 'Repository name on the server'), input('srvRepo', {}, L))),
+            h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Account'), input('user', {}, L)), h('div', {}, h('label', {}, 'Password of the account'), input('pass', { type: 'password', autocomplete: 'new-password' }, L))),
+            h('label', {}, 'Server certificate (for self-signed certificates, optional)'), input('ca', { placeholder: '/etc/herakles/server.crt' }, L)];
+        }
+      };
+      const pwPart = () => {
+        const modes = h('div', { class: 'tiles' },
+          tile('sparkle', 'Generate a strong password', 'Stored on this computer so scheduled backups run unattended. You keep a copy.', wz.pwMode === 'generate', () => { wz.pwMode = 'generate'; render(); }),
+          tile('key', 'Choose a password', 'Also stored on this computer for unattended backups.', wz.pwMode === 'enter', () => { wz.pwMode = 'enter'; render(); }),
+          tile('lock', 'Ask for it every time', 'Not stored. Scheduled backups only run while you have unlocked the repository in the open app.', wz.pwMode === 'ask', () => { wz.pwMode = 'ask'; render(); }));
+        const out = [h('h3', {}, 'Encryption password'), h('div', { class: 'muted' }, 'Everything is encrypted with AES-256. Without this password nobody — including you — can read the backups.'), modes];
+        if (wz.pwMode === 'generate') {
+          out.push(h('div', { class: 'pw-box' }, wz.password),
+            h('div', { class: 'actions', style: 'margin-top:8px' }, h('button', { type: 'button', class: 'small', onclick: async () => { try { await navigator.clipboard.writeText(wz.password); toast('Copied'); } catch (e) { toast('Select the password and copy it', true); } } }, 'Copy'),
+              h('button', { type: 'button', class: 'small', onclick: () => { wz.password = genPassword(); wz.saved = false; render(); } }, 'New password')),
+            check('saved', 'I have saved this password in a safe place (password manager, paper)'));
+        } else {
+          out.push(h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Password (at least 10 characters)'), input('pw1', { type: 'password', autocomplete: 'new-password' })),
+            h('div', {}, h('label', {}, 'Repeat'), input('pw2', { type: 'password', autocomplete: 'new-password' }))));
+        }
+        out.push(check('maintenance', 'Keep the repository tidy: free unused space every Sunday and check its integrity every month'));
+        return out;
+      };
+      const out = [h('h2', {}, icon('repos'), 'Where should the backups go?'), h('div', { class: 'sub' }, 'Backups are stored in a repository: deduplicated, compressed and encrypted.')];
+      out.push(h('div', { class: 'tiles' },
+        repos.map(r => tile(r.location.startsWith('smb://') ? 'share' : r.location.startsWith('sftp://') ? 'terminal' : r.location.startsWith('herakles') ? 'server' : 'usb',
+          r.name, r.location, wz.repoMode === 'existing' && wz.repo === r.name, () => { wz.repoMode = 'existing'; wz.repo = r.name; render(); })),
+        tile('plus', 'New location', 'A disk, a NAS, an SFTP server or a Herakles backup server.', wz.repoMode === 'new', () => { wz.repoMode = 'new'; render(); })));
+      if (wz.repoMode === 'new') {
+        out.push(h('h3', {}, 'Kind of storage'), h('div', { class: 'tiles' },
+          tile('usb', 'Local or USB disk', 'Also mounted network shares.', wz.type === 'local', () => { wz.type = 'local'; render(); }),
+          tile('share', 'Network share (SMB)', 'A NAS or Windows share, without mounting.', wz.type === 'smb', () => { wz.type = 'smb'; render(); }),
+          tile('terminal', 'SFTP server', 'Any server you can reach with SSH.', wz.type === 'sftp', () => { wz.type = 'sftp'; render(); }),
+          tile('server', 'Herakles server', 'A repository server, optionally append-only.', wz.type === 'server', () => { wz.type = 'server'; render(); })),
+          typeFields(), pwPart());
+      }
+      return out;
+    },
+
+    when: () => {
+      const t = input('time', { type: 'time', style: 'width:140px' });
+      return [h('h2', {}, icon('clock'), 'When should it run?'), h('div', { class: 'sub' }, 'Every backup is complete and restorable on its own; only changed data is stored again.'),
+        h('div', { class: 'tiles' },
+          tile('calendar', 'Every night', 'Quick incremental backups, a full one every 7 days.', wz.schedule === 'nightly', () => { wz.schedule = 'nightly'; render(); }),
+          tile('full', 'Weekly full, daily incremental', 'Full backup on Sundays, incremental Monday to Saturday.', wz.schedule === 'weekly', () => { wz.schedule = 'weekly'; render(); }),
+          tile('refresh', 'Every 4 hours', 'For data that changes during the day.', wz.schedule === 'hourly', () => { wz.schedule = 'hourly'; render(); }),
+          tile('play', 'Only when I start it', 'No schedule.', wz.schedule === 'manual', () => { wz.schedule = 'manual'; render(); })),
+        wz.schedule === 'nightly' || wz.schedule === 'weekly' ? [h('label', {}, 'Time'), t] : null,
+        wz.schedule !== 'manual' ? h('p', { class: 'muted' }, 'Missed backups (computer switched off) run when Herakles starts again. Scheduled backups need Herakles running in the background: the tray icon or the system service.') : null];
+    },
+
+    keep: () => [h('h2', {}, icon('retention'), 'How long should backups be kept?'), h('div', { class: 'sub' }, 'Older backups are thinned out automatically after every run. The newest backup is never removed.'),
+      h('div', { class: 'tiles' },
+        tile('clock', 'One week', 'The last 7 days.', wz.keep === 'week', () => { wz.keep = 'week'; render(); }),
+        tile('calendar', 'Standard', '7 daily, 4 weekly and 12 monthly backups — a year back.', wz.keep === 'standard', () => { wz.keep = 'standard'; render(); }),
+        tile('archive', 'Long', '14 daily, 8 weekly, 24 monthly and 5 yearly backups.', wz.keep === 'long', () => { wz.keep = 'long'; render(); }),
+        tile('shield', 'Keep everything', 'Nothing is ever removed automatically.', wz.keep === 'all', () => { wz.keep = 'all'; render(); }))],
+
+    finish: () => {
+      if (!wz.name) wz.name = uniqueName({ files: 'files', docker: 'containers', disk: 'disk' }[wz.kind] || 'backup');
+      const job = buildJob();
+      const repoLabel = wz.repoMode === 'existing' ? wz.repo + ' (' + (repos.find(r => r.name === wz.repo) || {}).location + ')' : repoDraft().name + ' — ' + repoDraft().location + ' (new)';
+      const row = (ic, k, v) => h('div', { class: 'summary-row' }, icon(ic), h('div', {}, h('div', { class: 'k' }, k), h('div', {}, v)));
+      return [h('h2', {}, icon('done'), 'Check and create'),
+        h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Name of the job'), input('name')), h('div', {}, h('label', {}, 'Description (optional)'), input('description'))),
+        h('div', { style: 'margin-top:14px' },
+          row(wz.kind === 'docker' ? 'containers' : wz.kind === 'disk' ? 'disk' : 'folder', 'Backs up', describeSources(job)),
+          row('repos', 'Stores in', repoLabel),
+          wz.repoMode === 'new' ? row('lock', 'Encryption', wz.pwMode === 'ask' ? 'Password asked for each session' : 'Password stored in a file next to the configuration') : null,
+          row('clock', 'Runs', { nightly: 'every night at ' + wz.time + ', full every 7 days', weekly: 'Sundays full, Monday to Saturday incremental, at ' + wz.time, hourly: 'every 4 hours, full every 7 days', manual: 'only when started' }[wz.schedule]),
+          row('retention', 'Keeps', { week: '7 daily backups', standard: '7 daily, 4 weekly, 12 monthly', long: '14 daily, 8 weekly, 24 monthly, 5 yearly', all: 'everything' }[wz.keep])),
+        check('runNow', 'Start the first backup right away'),
+        state.info && state.info.mode !== 'web' && wz.schedule !== 'manual' && !(cfg.tray && cfg.tray.autostart) ? check('autostart', 'Run scheduled backups in the background: start Herakles in the system tray when I log in') : null];
+    },
+  };
+
+  function describeSources(job) {
+    if (job.docker) {
+      const d = job.docker;
+      const parts = [];
+      if (!(d.projects || []).length && !(d.folders || []).length) parts.push('all Docker projects on this host');
+      if ((d.folders || []).length) parts.push('every project in ' + d.folders.join(', '));
+      if ((d.projects || []).length) parts.push('projects ' + d.projects.join(', '));
+      if ((d.exclude_projects || []).length) parts.push('except ' + d.exclude_projects.join(', '));
+      if ((d.stop || []).length) parts.push(d.stop.join(', ') + ' stopped during backup');
+      return parts.join('; ');
+    }
+    if (job.devices && job.devices.length) return job.devices.join(', ');
+    return job.paths.join(', ') + (job.exclude && job.exclude.length ? ' (leaving out ' + job.exclude.length + ' patterns)' : '');
+  }
+
+  function repoDraft() {
+    const L = wz.loc;
+    const base = { local: 'local', smb: 'nas', sftp: 'sftp', server: 'backup-server' }[wz.type];
+    const name = wz.repoName || uniqueRepo(base);
+    const r = { name, compression: '' };
+    if (wz.type === 'local') r.location = L.path.trim();
+    if (wz.type === 'smb') { r.location = 'smb://' + (L.user ? encodeURIComponent(L.user) + '@' : '') + L.host.trim() + '/' + L.share.trim() + (L.dir ? '/' + L.dir.replace(/^\/+/, '') : ''); r.remote = { password: L.pass }; }
+    if (wz.type === 'sftp') { r.location = 'sftp://' + (L.user ? L.user + '@' : '') + L.host.trim() + '/' + L.dir.replace(/^\/+/, ''); if (L.identity) r.remote = { identity_file: L.identity }; }
+    if (wz.type === 'server') { r.location = 'herakles://' + L.url.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') + '/' + L.srvRepo.trim(); r.remote = { username: L.user, password: L.pass, ca_cert: L.ca }; }
+    if (wz.maintenance) r.maintenance = { prune_schedule: '30 4 * * 0', repack_threshold: 0.2, check_schedule: '0 5 1 * *', check_read_data: '5%' };
+    return r;
+  }
+
+  function buildJob() {
+    const [hh, mm] = (wz.time || '02:00').split(':').map(Number);
+    const at = (mm || 0) + ' ' + (hh || 0);
+    const job = { name: wz.name.trim(), description: wz.description, repository: wz.repoMode === 'existing' ? wz.repo : repoDraft().name, catch_up: true };
+    if (wz.kind === 'files') {
+      job.paths = wz.paths.split('\n').map(x => x.trim()).filter(Boolean);
+      const ex = [];
+      if (wz.excl.caches) { ex.push('**/.cache', '*.tmp', '*.swp'); job.exclude_caches = true; }
+      if (wz.excl.build) ex.push('**/node_modules', '**/target', '**/.venv', '**/__pycache__');
+      if (wz.excl.downloads) ex.push('**/Downloads', '**/.local/share/Trash', '**/$RECYCLE.BIN');
+      ex.push(...wz.customExcl.split('\n').map(x => x.trim()).filter(Boolean));
+      job.exclude = ex;
+      job.one_file_system = !!wz.oneFS;
+    } else if (wz.kind === 'disk') {
+      job.devices = [wz.device.trim()];
+    } else {
+      job.docker = wz.dock ? wz.dock.value() : {};
+    }
+    job.schedule = { nightly: [{ cron: at + ' * * *', type: 'auto' }], weekly: [{ cron: at + ' * * 0', type: 'full' }, { cron: at + ' * * 1-6', type: 'incremental' }],
+      hourly: [{ cron: '0 */4 * * *', type: 'auto' }], manual: [] }[wz.schedule];
+    if (wz.schedule !== 'weekly') job.full_interval = '7d';
+    job.retention = { week: { keep_daily: 7 }, standard: { keep_daily: 7, keep_weekly: 4, keep_monthly: 12 },
+      long: { keep_daily: 14, keep_weekly: 8, keep_monthly: 24, keep_yearly: 5 }, all: {} }[wz.keep];
+    return job;
+  }
+
+  function validate() {
+    const step = WIZ_STEPS[wz.step].id;
+    if (step === 'what' && !wz.kind) return 'Choose what to back up';
+    if (step === 'sources') {
+      if (wz.kind === 'files' && !wz.paths.trim()) return 'Enter at least one folder';
+      if (wz.kind === 'disk' && !wz.device.trim()) return 'Enter the device';
+      if (wz.kind === 'docker') { try { if (!wz.dock.value()) return 'Tick "Back up Docker containers"'; } catch (e) { return e.message; } }
+    }
+    if (step === 'where' && wz.repoMode === 'new') {
+      const L = wz.loc;
+      if (wz.type === 'local' && !L.path.trim()) return 'Enter the folder for the backups';
+      if (wz.type === 'smb' && (!L.host.trim() || !L.share.trim())) return 'Enter the NAS and the share';
+      if (wz.type === 'sftp' && (!L.host.trim() || !L.dir.trim())) return 'Enter the server and the folder';
+      if (wz.type === 'server' && (!L.url.trim() || !L.srvRepo.trim())) return 'Enter the server and the repository name';
+      if (wz.pwMode === 'generate' && !wz.saved) return 'Save the password first and tick the box';
+      if (wz.pwMode !== 'generate') {
+        if (wz.pw1.length < 10) return 'The password needs at least 10 characters';
+        if (wz.pw1 !== wz.pw2) return 'The passwords do not match';
+      }
+    }
+    if (step === 'finish') {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(wz.name.trim())) return 'Use letters, digits, dot, dash or underscore for the name';
+      if (jobs.some(j => j.name === wz.name.trim())) return 'A job with this name exists already';
+    }
+    return '';
+  }
+
+  async function create(btn) {
+    btn.disabled = true;
+    const progress = h('div', { class: 'muted', style: 'margin-top:10px' });
+    btn.after(progress);
+    const say = m => { progress.textContent = m; };
+    try {
+      const job = buildJob();
+      let c = await loadConfig();
+      if (wz.repoMode === 'new') {
+        const r = repoDraft();
+        const pw = wz.pwMode === 'generate' ? wz.password : wz.pw1;
+        if (wz.pwMode !== 'ask') {
+          say('Storing the password…');
+          const res = await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/password-file', { password: pw });
+          r.password_file = res.path;
+        }
+        say('Saving the repository…');
+        c.repositories = (c.repositories || []).concat([r]);
+        c = await api('PUT', '/api/config', c);
+        say('Creating the encrypted repository…');
+        await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/init', { password: pw }, true);
+      }
+      say('Saving the job…');
+      c = await loadConfig();
+      c.jobs = (c.jobs || []).concat([job]);
+      if (wz.autostart) c.tray = Object.assign({}, c.tray, { autostart: true });
+      await saveConfig(c);
+      if (wz.runNow) { say('Starting the first backup…'); await api('POST', '/api/jobs/' + encodeURIComponent(job.name) + '/run', { type: 'auto' }); }
+      clear(card).append(h('div', { class: 'wiz-done' }, icon('done'), h('h2', {}, 'Backup job “' + job.name + '” is ready'),
+        h('p', { class: 'muted' }, wz.runNow ? 'The first backup is running. Follow it on the dashboard.' : 'It runs on its schedule; start it any time from the dashboard.'),
+        wz.repoMode === 'new' && wz.pwMode === 'generate' ? h('p', {}, 'Remember: the repository password you saved is the only way to read the backups.') : null,
+        h('div', { class: 'wiz-nav', style: 'justify-content:center' },
+          h('button', { class: 'primary', onclick: () => navigate(wz.kind === 'docker' ? 'containers' : 'dashboard') }, wz.kind === 'docker' ? 'Go to Containers' : 'Go to the Dashboard'),
+          h('button', { onclick: () => navigate('wizard') }, 'Set up another backup'))));
+      clear(stepsEl);
+    } catch (e) {
+      toast(e.message, true);
+      say('');
+      btn.disabled = false;
+    }
+  }
+
+  function pick(kind) {
+    if (wz.kind !== kind) { wz.kind = kind; wz.name = ''; }
+    render();
+  }
+
+  function render() {
+    clear(stepsEl).append(...WIZ_STEPS.map((st, i) => h('div', { class: 'wiz-step' + (i === wz.step ? ' active' : i < wz.step ? ' done' : '') }, icon(i < wz.step ? 'done' : st.icon), (i + 1) + '. ' + st.title)));
+    const id = WIZ_STEPS[wz.step].id;
+    const last = wz.step === WIZ_STEPS.length - 1;
+    // Keep the Docker picker element alive between steps.
+    if (wz.dock && wz.dock.el.parentNode) wz.dock.el.remove();
+    clear(card).append(...steps[id]().flat().filter(Boolean));
+    const nav = h('div', { class: 'wiz-nav' },
+      wz.step > 0 ? h('button', { onclick: () => { wz.step--; render(); } }, 'Back') : null,
+      h('span', { class: 'spacer' }),
+      last ? h('button', { class: 'primary', onclick: e => { const err = validate(); if (err) return toast(err, true); create(e.currentTarget); } }, 'Create backup')
+        : h('button', { class: 'primary', onclick: () => { const err = validate(); if (err) return toast(err, true); wz.step++; render(); } }, 'Next'));
+    card.append(nav);
+  }
+  render();
+};
+
 // ---------- containers (Docker projects) ----------
 views.containers = async main => {
   main.append(h('h1', {}, 'Containers'), h('div', { class: 'sub' },
@@ -801,7 +1108,7 @@ views.containers = async main => {
         const last = p.last;
         const res = p.result;
         grid.append(h('div', { class: 'card' },
-          h('h3', {}, p.name, p.standalone ? h('span', { class: 'chip' }, 'standalone') : null,
+          h('h3', {}, icon(p.databases && p.databases.length ? 'database' : 'containers'), p.name, p.standalone ? h('span', { class: 'chip' }, 'standalone') : null,
             run ? badge('running') : badge(res ? res.status : (last ? 'success' : null))),
           p.working_dir ? h('div', { class: 'meta mono' }, p.working_dir) : null,
           h('div', {}, (p.containers || []).map(c => h('div', { class: 'container-row' }, h('span', { class: 'dot' + (c.running ? ' on' : '') }), c.name, ' · ', c.image))),
