@@ -144,7 +144,7 @@ verified 1180 files</pre>
   <div class="wrap">
     <p class="eyebrow">Download</p>
     <h2 class="title">Herakles @VERSION@</h2>
-    <p class="intro">One file per platform. There is no installer: download it, make it executable and run it. The same file is the CLI, the interfaces, the background service and the backup server.</p>
+    <p class="intro">On Linux, install it with your package manager and get updates with the rest of the system. Or download the single file for your platform: it is the CLI, the interfaces, the background service and the backup server in one.</p>
     <div class="table-scroll">
     <table class="dl-table" id="dl-table">
       <tr><th>System</th><th>File</th><th>Size</th><th class="sum">SHA‑256</th></tr>
@@ -159,11 +159,17 @@ verified 1180 files</pre>
     <p style="margin-top:12px;font-size:14.5px;color:var(--muted)">All checksums: <a href="downloads/SHA256SUMS">SHA256SUMS</a> · versioned files: <a href="downloads/@VERSION@/">downloads/@VERSION@/</a></p>
 
     <div class="os-tabs" role="tablist">
-      <button role="tab" data-tab="linux" aria-selected="true">Install on Linux</button>
+      <button role="tab" data-tab="packages" aria-selected="true">Linux packages</button>
+      <button role="tab" data-tab="linux" aria-selected="false">Linux binary</button>
       <button role="tab" data-tab="windows" aria-selected="false">Install on Windows</button>
       <button role="tab" data-tab="macos" aria-selected="false">Install on macOS</button>
     </div>
-    <div class="os-panel" data-panel="linux">
+    <div class="os-panel" data-panel="packages">
+<pre><span class="c"># Debian, Ubuntu, Fedora, RHEL/Rocky/Alma, openSUSE, Arch: adds the signed repository and installs</span>
+curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh</pre>
+      <p style="color:var(--muted)">Updates then arrive with <code>apt upgrade</code>, <code>dnf upgrade</code>, <code>zypper up</code> or <code>pacman -Syu</code>. Packages for x86‑64, ARM64 and ARMv7, signed with key <code>1035 012D 5247 A80F D798 8DFD E64E FE56 44EE 8226</code> (<a href="herakles.asc">herakles.asc</a>). Setting it up by hand is described in the <a href="guide.html#install">guide</a>.</p>
+    </div>
+    <div class="os-panel" data-panel="linux" hidden>
 <pre><span class="c"># download (pick the file for your CPU), check it, install it</span>
 curl -LO https://herakles.kloeck-it.de/downloads/herakles-linux-amd64
 curl -LO https://herakles.kloeck-it.de/downloads/SHA256SUMS

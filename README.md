@@ -40,7 +40,15 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 
 ## Installation
 
-You need Go 1.26 or newer to build:
+On Linux, install the package from the signed repository on https://herakles.kloeck-it.de (Debian/Ubuntu, Fedora/RHEL/Rocky/Alma, openSUSE, Arch; x86‑64, ARM64, ARMv7):
+
+```sh
+curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh
+```
+
+It ships `/usr/bin/herakles`, a menu entry, shell completions and `herakles.service` (not enabled). Binaries for all platforms are on the same site.
+
+To build it yourself you need Go 1.26 or newer:
 
 ```sh
 make build            # ./herakles for this platform
@@ -187,7 +195,7 @@ The GUI is served only on `127.0.0.1` and protected by a random session token, C
 
 * **Dashboard**: job cards with Back up now / Full / Incremental / Differential, live progress, daemon status and next run.
 * **Systems**: one card per backed-up computer (from all repositories) with last backup, freshness dot, snapshot count, jobs and stored size; click it to see that system's snapshots.
-* **Snapshots & Restore**: summary (snapshots, jobs, latest backup, stored, read errors), filter by system and by type (full / incremental / differential), group by backup type, job, content, day or system, sort by any column; click a row for details (file counts, new data, parent, read errors, all paths). Compare two snapshots, forget one or several; **Download** a whole snapshot as ZIP, tar.gz or tar; **Browse** opens the explorer.
+* **Snapshots & Restore**: opens with an overview of the backed-up sets: one card per Docker project, disk and folder job (per system) with last backup, freshness, snapshot counts by type and size; click a card for its snapshots, or switch to *All snapshots*. Summary (snapshots, jobs, latest backup, stored, read errors), filter by system and by type (full / incremental / differential), group by backup type, job, content, day or system, sort by any column; click a row for details (file counts, new data, parent, read errors, all paths). Compare two snapshots, forget one or several; **Download** a whole snapshot as ZIP, tar.gz or tar; **Browse** opens the explorer.
 * **Explorer** (from Snapshots, the dashboard and container cards): breadcrumbs, a version switcher for the same job, sortable columns, filter, name search below the current folder (`invoice`, `*.pdf`), preview of text files and images, multi-select across folders; download the selection (a single file as it is, anything else as ZIP, tar.gz or tar) or restore it. `Backspace` goes up, `Esc` closes.
 * **Backup Jobs**: full editor for sources, exclusions, schedules (with presets), retention, hooks and retries.
 * **Repositories**: add/edit (local, SMB, SFTP, server), encryption/password source, key file, bandwidth limits, maintenance schedules, initialize, check, prune, statistics.
@@ -334,6 +342,10 @@ locks/<id>            encrypted lock files
 Blobs are `zstd(plaintext)` with a 1‑byte algorithm header and are encrypted individually with AES‑256‑GCM and a random nonce. Blob IDs are `HMAC‑SHA256(mac_key, plaintext)`. Files are named after the SHA‑256 of their stored bytes, so storage corruption is detectable.
 
 ---
+
+## Packages
+
+`packaging/` builds the Linux packages and repositories: `nfpm.yaml` (deb, rpm, pacman), the systemd unit, the desktop entry, install scripts, `install.sh` for the website and `repotool` (apt `Packages`/`Release` and the pacman database, written in Go). `packaging/build.sh <tag> dist <out>` builds and signs everything; `website/deploy/deploy.sh` runs it for release tags and publishes `/apt`, `/rpm` and `/arch`. The signing key lives in `.herakles-signing/` (gitignored, never commit it).
 
 ## Development & tests
 

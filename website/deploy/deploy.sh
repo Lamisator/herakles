@@ -7,7 +7,9 @@
 # Commit first: the version shown on the site is `git describe --tags`.
 # BUILD_ONLY=1 only builds website/build for a local preview.
 # Binaries are only uploaded when they changed; older versions stay
-# available under /downloads/<version>/.
+# available under /downloads/<version>/. On release tags the signed Linux
+# packages and apt/rpm/pacman repositories are rebuilt (packaging/build.sh)
+# and published under /apt, /rpm, /arch (REPACKAGE=1 forces it).
 set -euo pipefail
 
 HOST=${HOST:-root@k-inf1-server.kloeck-it.de}
@@ -60,6 +62,17 @@ if grep -n '@[A-Z_a-z0-9.-]*@' "$build"/release/*.html; then
   exit 1
 fi
 
+# Linux packages and repositories (apt, rpm, pacman): only for release tags.
+packages=
+if [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "== building packages"
+  packaging/build.sh "$VERSION" dist "$build/packages" >/dev/null
+  echo "$VERSION" > "$build/packages/VERSION"
+  packages=1
+else
+  echo "   $VERSION is no release tag: packages stay at the last release"
+fi
+
 if [[ ${BUILD_ONLY:-} == 1 ]]; then
   echo "built $build (not deployed)"
   exit 0
@@ -73,6 +86,19 @@ if [[ "$(remote "cat $DIR/www/downloads/$VERSION/SHA256SUMS 2>/dev/null" || true
 else
   tar -C "$build/downloads" -cf - . | remote "tar -xf - -C $DIR/www/downloads"
 fi
+if [[ -n $packages ]]; then
+  if [[ "$(remote "cat $DIR/www/packages/VERSION 2>/dev/null" || true)" == "$VERSION" && ${REPACKAGE:-} != 1 ]]; then
+    echo "   packages for $VERSION are already published"
+  else
+    tar -C "$build/packages" -cf - . | remote "set -e
+      rm -rf $DIR/www/packages.new $DIR/www/packages.old
+      mkdir $DIR/www/packages.new
+      tar -xf - -C $DIR/www/packages.new
+      [ -d $DIR/www/packages ] && mv $DIR/www/packages $DIR/www/packages.old
+      mv $DIR/www/packages.new $DIR/www/packages
+      rm -rf $DIR/www/packages.old"
+  fi
+fi
 release=$(date -u +%Y%m%d%H%M%S)
 tar -C "$build/release" -cf - . | remote "set -e
   mkdir $DIR/www/releases/$release
@@ -80,7 +106,11 @@ tar -C "$build/release" -cf - . | remote "set -e
   ln -sfn releases/$release $DIR/www/current.new
   mv -T $DIR/www/current.new $DIR/www/current
   cd $DIR/www/releases && ls -1d */ | sort | head -n -3 | xargs -r rm -rf
-  cd $DIR && docker compose up -d --quiet-pull"
+  cd $DIR && docker compose up -d --quiet-pull
+  # nginx.conf is replaced (new inode), which a running container does not see
+  if ! docker exec herakles-web cat /etc/nginx/conf.d/default.conf 2>/dev/null | cmp -s - nginx.conf; then
+    docker restart herakles-web >/dev/null
+  fi"
 
 echo "== checking $URL"
 for _ in $(seq 30); do

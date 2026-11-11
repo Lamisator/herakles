@@ -77,8 +77,35 @@
 <p>All of them read and write the same <a href="#config">YAML configuration file</a>.</p>
 
 <h2 id="install">Installation</h2>
-<p>Download the file for your system from the <a href="./#download">download section</a>. There is no installer and nothing else to install.</p>
-<h3>Linux</h3>
+<p>On Linux, install the package from the Herakles repository, which keeps it updated with the rest of the system. Everywhere else, download the file for your system from the <a href="./#download">download section</a>; there is nothing else to install.</p>
+<h3 id="packages">Linux packages</h3>
+<p>One command adds the signed repository for your distribution and installs the package:</p>
+<pre>curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh</pre>
+<p>It supports Debian and Ubuntu (apt), Fedora, RHEL, Rocky and Alma Linux (dnf), openSUSE (zypper) and Arch Linux (pacman), on x86‑64, ARM64 and ARMv7. Repository metadata and packages are signed with the key <code>1035012D5247A80FD7988DFDE64EFE5644EE8226</code> (<a href="herakles.asc">herakles.asc</a>, binary: <a href="herakles.gpg">herakles.gpg</a>). To set it up by hand:</p>
+<pre><span class="c"># Debian / Ubuntu</span>
+sudo install -d -m 755 /etc/apt/keyrings
+curl -fsSL https://herakles.kloeck-it.de/herakles.gpg | sudo tee /etc/apt/keyrings/herakles.gpg &gt;/dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/herakles.gpg] https://herakles.kloeck-it.de/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/herakles.list
+sudo apt update &amp;&amp; sudo apt install herakles
+
+<span class="c"># Fedora / RHEL / Rocky / Alma</span>
+sudo curl -fsSL -o /etc/yum.repos.d/herakles.repo https://herakles.kloeck-it.de/rpm/herakles.repo
+sudo dnf install herakles
+
+<span class="c"># openSUSE</span>
+sudo zypper addrepo https://herakles.kloeck-it.de/rpm/herakles.repo
+sudo zypper install herakles
+
+<span class="c"># Arch Linux: add to /etc/pacman.conf, then trust the key</span>
+[herakles]
+Server = https://herakles.kloeck-it.de/arch/$arch
+
+curl -fsSL https://herakles.kloeck-it.de/herakles.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 1035012D5247A80FD7988DFDE64EFE5644EE8226
+sudo pacman -Sy herakles</pre>
+<p>The package installs <code>/usr/bin/herakles</code>, a menu entry (“Herakles”), shell completions for bash, zsh and fish, and the system service <code>herakles.service</code>, which is <em>not</em> enabled: set up <code>/etc/herakles/herakles.yaml</code> first (for example with <code>sudo herakles tui</code>), then run <code>sudo systemctl enable --now herakles</code>. On a desktop, use the tray instead (<code>herakles tray --open</code>, autostart from its menu). Package updates restart a running service. Removing the package stops the service; configuration and repositories are kept.</p>
+<h3>Linux (single file)</h3>
 <pre>curl -LO https://herakles.kloeck-it.de/downloads/herakles-linux-amd64   <span class="c"># or -arm64 / -armv7</span>
 curl -LO https://herakles.kloeck-it.de/downloads/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
@@ -93,7 +120,7 @@ herakles version</pre>
 <h3>macOS (experimental)</h3>
 <p>The Apple Silicon build has not been tested on a Mac yet. CLI, terminal UI and GUI are expected to work; the tray icon is not available. Remove the download quarantine with <code>xattr -d com.apple.quarantine herakles-macos-arm64</code>.</p>
 <h3>Updating and removing</h3>
-<p>To update, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
+<p>Packages update with the system. For the single file, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
 
 <h2 id="quick-start">Quick start</h2>
 <h3 id="qs-gui">With the desktop interface</h3>
@@ -677,7 +704,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
   <li><strong>Dashboard</strong>: jobs with <em>Back up now</em>, <em>Full</em>, <em>Incremental</em>, <em>Differential</em>, live progress, daemon state and next run.</li>
   <li><strong>Containers</strong>: Docker Compose projects with containers, databases, last backup, and per-project backup and restore.</li>
   <li><strong>Systems</strong>: one card per backed-up computer, across all repositories, with last backup (green: within a day, yellow: within a week, red: older), snapshots, jobs and stored size. Click a card to see that computer's snapshots.</li>
-  <li><strong>Snapshots &amp; Restore</strong>: a summary on top; filter by computer and by backup type; group by type, job, content, day or computer; sort by clicking a column title; click a row for its details (files, new data, base snapshot, read errors, all paths). Browse, restore, download, compare, forget one or several at once.</li>
+  <li><strong>Snapshots &amp; Restore</strong>: opens with an overview of what is backed up: one card per Docker project, disk and folder job (per computer), grouped by kind, with the last backup, freshness, the number of full, incremental and differential snapshots and the size. Click a card to see its snapshots, or switch to <em>All snapshots</em>. A summary on top; filter by computer and by backup type; group by type, job, content, day or computer; sort by clicking a column title; click a row for its details (files, new data, base snapshot, read errors, all paths). Browse, restore, download, compare, forget one or several at once.</li>
   <li><strong>Backup Jobs</strong>: the complete job editor with schedule presets, retention, hooks and retries.</li>
   <li><strong>Repositories</strong>: add and edit all storage types, unlock settings, bandwidth limits, maintenance schedules; initialize, check, prune and statistics.</li>
   <li><strong>Configuration</strong>: tray autostart and the raw YAML editor (keeps your comments).</li>

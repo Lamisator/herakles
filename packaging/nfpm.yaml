@@ -1,0 +1,59 @@
+# Package definition for nfpm (deb, rpm, archlinux); used by
+# packaging/build.sh, which fills in the ${PKG_*} placeholders.
+name: herakles
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+release: 1
+section: admin
+priority: optional
+maintainer: Marius Klöck <herakles@kloeck-it.de>
+vendor: Marius Klöck
+homepage: https://herakles.kloeck-it.de
+license: Proprietary
+description: |-
+  Deduplicated, compressed and encrypted backups
+  Herakles backs up files, disks and Docker Compose projects (with database
+  dumps) to local disks, SMB shares, SFTP servers or a Herakles server.
+  One static binary: CLI, terminal UI, desktop interface with tray icon,
+  web interface, scheduling daemon and backup server.
+contents:
+  - src: ${PKG_BINARY}
+    dst: /usr/bin/herakles
+    file_info: {mode: 0755}
+  - src: packaging/herakles.service
+    dst: /usr/lib/systemd/system/herakles.service
+    file_info: {mode: 0644}
+  - src: packaging/herakles.desktop
+    dst: /usr/share/applications/herakles.desktop
+    file_info: {mode: 0644}
+  - src: website/site/favicon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/herakles.svg
+    file_info: {mode: 0644}
+  - src: ${PKG_GEN}/herakles.bash
+    dst: /usr/share/bash-completion/completions/herakles
+    file_info: {mode: 0644}
+  - src: ${PKG_GEN}/herakles.zsh
+    dst: /usr/share/zsh/site-functions/_herakles
+    file_info: {mode: 0644}
+  - src: ${PKG_GEN}/herakles.fish
+    dst: /usr/share/fish/vendor_completions.d/herakles.fish
+    file_info: {mode: 0644}
+  - src: README.md
+    dst: /usr/share/doc/herakles/README.md
+    file_info: {mode: 0644}
+  - dst: /etc/herakles
+    type: dir
+    file_info: {mode: 0700}
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+rpm:
+  group: Applications/Archiving
+  signature:
+    key_file: ${PKG_SIGN_KEY}
+archlinux:
+  packager: Marius Klöck <herakles@kloeck-it.de>
+  scripts:
+    postupgrade: packaging/scripts/postinstall.sh

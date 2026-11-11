@@ -294,3 +294,17 @@ div.job-cell { display: flex; }
 .tile, .summary-row > div, .stat > div, .dev-main, .sys-text { min-width: 0; }
 .tile b, .tile .d, .summary-row, .toast, .chip, .modal .body p, .stat .v { overflow-wrap: anywhere; }
 .chip { max-width: 100%; }
+/* backup sets (Snapshots overview) */
+h2.set-section { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; }
+h2.set-section .ico { color: var(--accent); }
+h2.set-section .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
+.sys-ico.kind-docker { background: color-mix(in srgb, #1d91c9 14%, transparent); color: #1d91c9; }
+.sys-ico.kind-disk { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.sys-ico.small { width: 38px; height: 38px; border-radius: 10px; }
+.sys-ico.small > .ico { width: 22px; height: 22px; }
+.set-card .sys-kinds { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.set-paths { flex-basis: 100%; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.set-actions { margin-top: auto; padding-top: 4px; }
+.set-head { display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+.set-head b { font-size: 16px; overflow-wrap: anywhere; }
+.set-head > div { min-width: 0; }

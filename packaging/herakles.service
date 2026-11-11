@@ -1,0 +1,20 @@
+# Installed by the herakles package. Configure /etc/herakles/herakles.yaml
+# first (e.g. with `sudo herakles tui` or the web interface), then:
+#   sudo systemctl enable --now herakles
+[Unit]
+Description=Herakles backup daemon: runs scheduled, deduplicated and encrypted backups.
+Documentation=https://herakles.kloeck-it.de/guide.html
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/herakles/herakles.yaml
+
+[Service]
+ExecStart=/usr/bin/herakles daemon run --config /etc/herakles/herakles.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=120
+EnvironmentFile=-/etc/default/herakles
+EnvironmentFile=-/etc/sysconfig/herakles
+
+[Install]
+WantedBy=multi-user.target
