@@ -199,12 +199,16 @@ func (a *App) configSetCmd() *cobra.Command {
 
 	var j config.Job
 	var schedules []string
+	var dk config.DockerJob
+	var useDocker bool
 	job := &cobra.Command{
 		Use:   "job NAME",
 		Short: "Add or replace a backup job",
 		Example: `  herakles config set job home --repository local --path /home --exclude '*.tmp' \
       --schedule '0 2 * * 0=full' --schedule '0 2 * * 1-6=incremental' \
-      --yaml 'retention: {keep_daily: 7, keep_weekly: 4, keep_monthly: 12}'`,
+      --yaml 'retention: {keep_daily: 7, keep_weekly: 4, keep_monthly: 12}'
+  herakles config set job containers --repository nas --docker-folder /srv \
+      --docker-project wiki --docker-exclude portainer --docker-stop zammad --schedule '15 3 * * *=auto'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nj := j
@@ -214,6 +218,15 @@ func (a *App) configSetCmd() *cobra.Command {
 				}
 			}
 			nj.Name = args[0]
+			if useDocker || len(dk.Projects)+len(dk.Folders)+len(dk.ExcludeProjects)+len(dk.Stop) > 0 {
+				if nj.Docker == nil {
+					nj.Docker = &config.DockerJob{}
+				}
+				nj.Docker.Projects = append(nj.Docker.Projects, dk.Projects...)
+				nj.Docker.Folders = append(nj.Docker.Folders, dk.Folders...)
+				nj.Docker.ExcludeProjects = append(nj.Docker.ExcludeProjects, dk.ExcludeProjects...)
+				nj.Docker.Stop = append(nj.Docker.Stop, dk.Stop...)
+			}
 			for _, s := range schedules {
 				expr, typ, _ := strings.Cut(s, "=")
 				nj.Schedules = append(nj.Schedules, config.Schedule{Cron: strings.TrimSpace(expr), Type: strings.TrimSpace(typ)})
@@ -243,6 +256,11 @@ func (a *App) configSetCmd() *cobra.Command {
 	job.Flags().StringArrayVar(&schedules, "schedule", nil, "schedule as 'CRON=TYPE' (repeatable)")
 	job.Flags().StringVar(&j.FullInterval, "full-interval", "", "promote auto backups to full after this duration")
 	job.Flags().StringVar(&jobYAML, "yaml", "", "additional settings as inline YAML")
+	job.Flags().BoolVar(&useDocker, "docker", false, "back up Docker Compose projects (all, unless limited by the --docker-* flags)")
+	job.Flags().StringArrayVar(&dk.Projects, "docker-project", nil, "Docker project name or glob to back up (repeatable)")
+	job.Flags().StringArrayVar(&dk.Folders, "docker-folder", nil, "back up every Docker project in this folder, also new ones (repeatable)")
+	job.Flags().StringArrayVar(&dk.ExcludeProjects, "docker-exclude", nil, "Docker project to leave out (repeatable)")
+	job.Flags().StringArrayVar(&dk.Stop, "docker-stop", nil, "Docker project to stop during its backup (repeatable)")
 
 	remove := &cobra.Command{
 		Use: "remove repo|job NAME", Short: "Remove a repository or job", Args: cobra.ExactArgs(2),

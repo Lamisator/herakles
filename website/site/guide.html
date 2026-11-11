@@ -475,8 +475,9 @@ services:
   - name: containers
     repository: nas
     docker:
-      scan_dirs: [/srv/docker]        <span class="c"># also projects whose containers don't exist right now</span>
-      exclude_projects: [portainer]   <span class="c"># globs; projects: [...] selects instead</span>
+      folders: [/srv]                 <span class="c"># every project in /srv, also ones created later</span>
+      <span class="c"># projects: [wiki, shop-*]      # and/or these projects (names or globs)</span>
+      exclude_projects: [portainer]   <span class="c"># always left out</span>
       <span class="c"># stop: [zammad]                # stop these during their backup instead of dumping</span>
       <span class="c"># skip_dumps / skip_volumes / skip_bind_mounts / skip_standalone: true</span>
     paths: [/srv/other-data]          <span class="c"># optional: host data outside the projects</span>
@@ -484,6 +485,19 @@ services:
     schedule: [{ cron: "15 3 * * *", type: auto }]
     full_interval: 7d
     retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 6 }</pre>
+<h4>Choosing the projects</h4>
+<table>
+<tr><th>Setting</th><th>Effect</th></tr>
+<tr><td>neither <code>projects</code> nor <code>folders</code></td><td>Every project on the host, including ones created later.</td></tr>
+<tr><td><code>folders: [/srv]</code></td><td>Every project whose directory is inside <code>/srv</code> (for standalone containers: a bind mount inside it), <strong>including projects created later</strong>. The folders are also searched up to three levels deep for project directories whose containers don't exist right now.</td></tr>
+<tr><td><code>projects: [wiki, shop-*]</code></td><td>These projects (names or glob patterns), in addition to the folders.</td></tr>
+<tr><td><code>exclude_projects: [portainer]</code></td><td>Always left out.</td></tr>
+<tr><td><code>stop: [zammad]</code></td><td>Stopped during their backup instead of dumping their databases.</td></tr>
+</table>
+<p>In the GUI, open <strong>Backup Jobs → New job</strong> (or Edit), tick <strong>Back up Docker containers</strong> and choose <em>All projects on this host</em> or <em>Only the projects I choose</em>. The editor lists every project on the host: tick the ones to back up, and per project whether it is stopped during its backup; folders you enter are applied right away (their projects show an “in /srv” tag). On the command line:</p>
+<pre>herakles config set job containers --repository nas --docker-folder /srv \
+    --docker-project wiki --docker-exclude portainer --docker-stop zammad \
+    --schedule '15 3 * * *=auto'</pre>
 <p>Retention applies to each project separately. Run the job as root (the system service), since project data usually belongs to root or container users.</p>
 <pre>herakles docker ls --last            <span class="c"># projects, containers, databases, data paths, last backup</span>
 herakles docker show wiki            <span class="c"># exactly what is backed up for one project</span>

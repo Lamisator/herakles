@@ -81,7 +81,7 @@ func TestGroupAndData(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &docker.Client{Binary: fake.Bin}
-	ps, err := c.Projects(context.Background(), []string{filepath.Join(dir, "srv")})
+	ps, err := c.Projects(context.Background(), docker.Search{Dirs: []string{filepath.Join(dir, "srv")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestLabelledAndOrphanVolumes(t *testing.T) {
 	fake.SetVolumes(docker.Volume{Name: "kimai_mysql", Mountpoint: vol, Project: "kimai"},
 		docker.Volume{Name: "lost", Mountpoint: filepath.Join(dir, "volumes", "lost", "_data")})
 	c := &docker.Client{Binary: fake.Bin}
-	ps, vs, err := c.ProjectsAndVolumes(context.Background(), []string{filepath.Join(dir, "srv")})
+	ps, vs, err := c.ProjectsAndVolumes(context.Background(), docker.Search{Dirs: []string{filepath.Join(dir, "srv")}})
 	if err != nil || len(ps) != 1 {
 		t.Fatal(ps, err)
 	}
@@ -201,5 +201,25 @@ func TestLabelledAndOrphanVolumes(t *testing.T) {
 	orphans := docker.Orphans(ps, vs)
 	if len(orphans) != 1 || orphans[0].Name != "lost" {
 		t.Fatalf("orphans: %+v", orphans)
+	}
+}
+
+func TestScanTreeAndDirs(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"docker/app/compose.yml", "docker/app/nested/compose.yml", "apps/x/y/docker-compose.yaml", ".hidden/z/compose.yml", "a/b/c/d/compose.yml"} {
+		os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0o755)
+		os.WriteFile(filepath.Join(dir, p), []byte("services: {}\n"), 0o644)
+	}
+	var names []string
+	for _, p := range docker.ScanTree([]string{dir}, 3) {
+		names = append(names, p.Name)
+	}
+	// Not below a project, not into hidden dirs, at most 3 levels.
+	if strings.Join(names, ",") != "y,app" && strings.Join(names, ",") != "app,y" {
+		t.Fatalf("found %v", names)
+	}
+	sa := docker.Project{Standalone: true, Containers: []docker.Container{{Mounts: []docker.Mount{{Type: "bind", Source: "/srv/x"}, {Type: "volume", Source: "/var/lib/docker/v"}}}}}
+	if d := sa.Dirs(); len(d) != 1 || d[0] != "/srv/x" {
+		t.Fatal(d)
 	}
 }

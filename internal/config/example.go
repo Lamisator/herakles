@@ -118,9 +118,11 @@ jobs:
   - name: containers
     repository: local
     docker:
-      # projects: ["*"]            # globs; default all
+      # Without projects and folders, every project on the host is backed up.
+      folders: [/srv]              # every project in /srv, also ones created later
+      # projects: [wiki, shop-*]   # and/or these projects (names or globs)
       exclude_projects: [portainer]
-      scan_dirs: [/srv/docker]     # also projects whose containers do not exist
+      # scan_dirs: [/opt/stacks]   # also find project dirs without containers here
       # stop: [zammad]             # stop these during their backup instead of dumping
       # skip_dumps: false
       # skip_volumes: false

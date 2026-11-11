@@ -16,7 +16,8 @@ func TestExampleParses(t *testing.T) {
 	if len(c.Repositories) != 2 || len(c.Jobs) != 3 {
 		t.Fatalf("parsed %d repos %d jobs", len(c.Repositories), len(c.Jobs))
 	}
-	if d := c.Job("containers").Docker; d == nil || !d.Selects("wiki") || d.Selects("portainer") || len(d.ScanDirs) != 1 {
+	if d := c.Job("containers").Docker; d == nil || !d.Selects("wiki", "/srv/docker/wiki") || d.Selects("other", "/opt/other") ||
+		d.Selects("portainer", "/srv/docker/portainer") || len(d.Folders) != 1 {
 		t.Fatalf("docker job: %+v", d)
 	}
 	j := c.Job("home")
@@ -130,5 +131,38 @@ func TestParseHelpers(t *testing.T) {
 	}
 	if _, err := ParseCron("@every 6h"); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestDockerSelection(t *testing.T) {
+	var all *DockerJob = &DockerJob{}
+	if !all.Selects("anything", "/opt/x") {
+		t.Fatal("empty selection means all projects")
+	}
+	d := &DockerJob{Projects: []string{"wiki", "shop-*"}, Folders: []string{"/srv/"}, ExcludeProjects: []string{"portainer"}}
+	for _, c := range []struct {
+		name, dir string
+		want      bool
+	}{
+		{"wiki", "/opt/wiki", true},        // by name
+		{"shop-a", "", true},               // by glob
+		{"blog", "/srv/docker/blog", true}, // by folder (new projects too)
+		{"blog", "/srv", true},
+		{"other", "/srvx/other", false}, // prefix of a name is not inside
+		{"other", "/opt/other", false},
+		{"portainer", "/srv/docker/portainer", false}, // excluded wins
+	} {
+		if got := d.Selects(c.name, c.dir); got != c.want {
+			t.Errorf("%s in %s: %v, want %v", c.name, c.dir, got, c.want)
+		}
+	}
+	if d.InFolders("/srv/docker/blog") != "/srv" {
+		t.Fatal(d.InFolders("/srv/docker/blog"))
+	}
+	c := New("/x.yaml")
+	c.Repositories = []*Repository{{Name: "r", Location: "/r", Password: "p"}}
+	c.Jobs = []*Job{{Name: "j", Repository: "r", Docker: &DockerJob{Folders: []string{"srv"}}}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatal("relative folder accepted:", err)
 	}
 }

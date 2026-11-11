@@ -258,3 +258,41 @@ func TestDockerRestoreRollback(t *testing.T) {
 		t.Fatal("project not restarted after rollback")
 	}
 }
+
+func TestDockerFoldersIncludeNewProjects(t *testing.T) {
+	ctx := context.Background()
+	d := setupDocker(t)
+	srv := filepath.Dir(d.wd)
+	job := d.e.Config().Job("containers")
+	job.Docker.ExcludeProjects, job.Docker.ScanDirs = nil, nil
+	job.Docker.Folders = []string{filepath.Dir(srv)} // the parent of srv/: two levels above the projects
+	names := func() []string {
+		ps, err := d.e.DockerProjects(ctx, job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, p := range ps {
+			out = append(out, p.Name)
+		}
+		return out
+	}
+	// The standalone "cache" container has no bind mount in the folder.
+	if got := strings.Join(names(), ","); got != "blog,shop" {
+		t.Fatal(got)
+	}
+	// A project created later in the folder is included automatically.
+	write(t, filepath.Join(srv, "newapp", "compose.yaml"), "services: {}\n")
+	if got := strings.Join(names(), ","); got != "blog,newapp,shop" {
+		t.Fatal("new project not picked up:", got)
+	}
+	res, err := d.e.RunJob(ctx, "containers", RunOptions{})
+	if err != nil || len(res.Projects) != 3 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	// Explicit names and folders combine; exclusions win.
+	job.Docker.Folders, job.Docker.Projects, job.Docker.ExcludeProjects = []string{filepath.Join(srv, "shop")}, []string{"cache"}, []string{"shop"}
+	if got := strings.Join(names(), ","); got != "cache" {
+		t.Fatal(got)
+	}
+}

@@ -61,7 +61,21 @@ func TestCLIDocker(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(alt, vol, "base", "1")); string(b) != "row v1" {
 		t.Fatal("target restore:", string(b))
 	}
-	if _, errs, code := e.run("docker", "restore", "nope", "--yes"); code == 0 || !strings.Contains(errs, "nope") {
+	// A job selecting projects by folder (new projects included automatically).
+	e.ok("config", "set", "job", "byfolder", "--repository", "main", "--docker-folder", filepath.Join(e.dir, "srv"),
+		"--docker-stop", "wiki", "--yaml", "docker: {binary: "+fake.Bin+"}")
+	if out := e.ok("docker", "ls", "byfolder"); !strings.Contains(out, "wiki") || !strings.Contains(out, "stop") {
+		t.Fatal(out)
+	}
+	os.MkdirAll(filepath.Join(e.dir, "srv", "later"), 0o755)
+	os.WriteFile(filepath.Join(e.dir, "srv", "later", "compose.yaml"), []byte("services: {}\n"), 0o644)
+	if out := e.ok("docker", "ls", "byfolder"); !strings.Contains(out, "later") {
+		t.Fatal("new project in the folder not listed:", out)
+	}
+	if _, errs, code := e.run("config", "set", "job", "bad", "--repository", "main", "--docker-folder", "relative"); code == 0 || !strings.Contains(errs, "absolute") {
+		t.Fatal("relative folder accepted:", errs)
+	}
+	if _, errs, code := e.run("docker", "restore", "containers/nope", "--yes"); code == 0 || !strings.Contains(errs, "nope") {
 		t.Fatal(errs)
 	}
 }

@@ -1,10 +1,10 @@
-# /etc/traefik/dynamic/herakles-backup.yml on k-inf1: routes backup.kloeck-it.de
+# /etc/traefik/dynamic/herakles-backup.yml on k-inf1: routes backup.k-inf1-server.kloeck-it.de
 # to the Herakles daemon on the host (web.listen in /etc/herakles/herakles.yaml).
 # Needs: ufw allow from 192.168.32.0/20 to 192.168.32.1 port 7480 proto tcp
 http:
   routers:
     herakles-backup:
-      rule: "Host(`backup.kloeck-it.de`)"
+      rule: "Host(`backup.k-inf1-server.kloeck-it.de`)"
       entryPoints: [websecure]
       service: herakles-backup
       tls:

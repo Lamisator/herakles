@@ -233,7 +233,8 @@ jobs:
   - name: containers
     repository: nas
     docker:
-      scan_dirs: [/srv/docker]       # also projects without containers
+      folders: [/srv]                # every project in /srv, also ones created later
+      # projects: [wiki, shop-*]     # and/or explicit projects; neither = all projects
       exclude_projects: [portainer]
       # stop: [zammad]               # stop during backup instead of dumping
     paths: [/srv/other]              # host data outside the projects (optional)
@@ -241,6 +242,8 @@ jobs:
     full_interval: 7d
     retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 6 }
 ```
+
+Without `projects` and `folders` every project on the host is backed up. `folders` includes every project whose directory lies inside one of them (for standalone containers: one of their bind mounts), so projects created later are picked up automatically; folders are also searched (three levels deep) for project directories whose containers do not exist. `projects` adds projects by name or glob, `exclude_projects` always wins. In the GUI job editor you tick the projects on the host (and per project whether it is stopped during its backup); on the command line use `config set job NAME --docker-folder /srv --docker-project wiki --docker-exclude portainer --docker-stop zammad`.
 
 Projects are discovered from the Compose container labels. Each project gets its own snapshot `containers/<project>` holding the project directory, bind mounts outside it, its named volumes (by mount and by Compose label, so stopped projects keep theirs), `docker inspect` output and logical dumps of its Postgres, MySQL/MariaDB and MongoDB containers (taken while running; database containers without a server, such as backup sidecars, are skipped). Retention and history work per project.
 

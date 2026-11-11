@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lamisator/herakles/internal/config"
@@ -60,8 +61,62 @@ type dockerJobView struct {
 	Error      string        `json:"error,omitempty"`
 }
 
+// hostProject describes a project on the host for the job editor.
+type hostProject struct {
+	Name       string   `json:"name"`
+	WorkingDir string   `json:"working_dir,omitempty"`
+	Standalone bool     `json:"standalone,omitempty"`
+	Dirs       []string `json:"dirs"`
+	Running    int      `json:"running"`
+	Containers []string `json:"containers"`
+	Databases  []string `json:"databases,omitempty"`
+}
+
 func (s *Server) dockerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/docker", s.dockerList)
+	// All projects on the host (for choosing them in a job). Query: job (its
+	// docker binary), folders and scan (comma separated directories to
+	// search for projects without containers).
+	mux.HandleFunc("GET /api/docker/host", func(w http.ResponseWriter, r *http.Request) {
+		// The job's docker binary, else the one configured for other jobs.
+		dc := &docker.Client{}
+		if j := s.eng.Config().Job(r.URL.Query().Get("job")); j != nil && j.Docker != nil && j.Docker.Binary != "" {
+			dc = engine.DockerClient(j)
+		} else {
+			for _, j := range s.eng.Config().Jobs {
+				if j.Docker != nil && j.Docker.Binary != "" {
+					dc = engine.DockerClient(j)
+					break
+				}
+			}
+		}
+		split := func(v string) []string {
+			var out []string
+			for _, x := range strings.Split(v, ",") {
+				if x = strings.TrimSpace(x); x != "" {
+					out = append(out, x)
+				}
+			}
+			return out
+		}
+		ps, err := dc.Projects(r.Context(), docker.Search{Dirs: split(r.URL.Query().Get("scan")), Trees: split(r.URL.Query().Get("folders"))})
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		out := []hostProject{}
+		for _, p := range ps {
+			hp := hostProject{Name: p.Name, WorkingDir: p.WorkingDir, Standalone: p.Standalone, Dirs: p.Dirs(), Running: p.Running(), Containers: []string{}}
+			for _, c := range p.Containers {
+				hp.Containers = append(hp.Containers, c.Name)
+				if k, ok := docker.DetectDB(c); ok {
+					hp.Databases = append(hp.Databases, string(k))
+				}
+			}
+			out = append(out, hp)
+		}
+		writeJSON(w, 200, out)
+	})
 	mux.HandleFunc("GET /api/docker/{job}/{project}/snapshots", func(w http.ResponseWriter, r *http.Request) {
 		unit := r.PathValue("job") + "/" + r.PathValue("project")
 		snaps, err := s.eng.ProjectSnapshots(r.Context(), unit)

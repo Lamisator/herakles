@@ -171,9 +171,17 @@ type Job struct {
 }
 
 // DockerJob selects the containers a job backs up and how.
+//
+// Without Projects and Folders, every project is backed up. Otherwise a
+// project is backed up if its name matches Projects or it lives in one of
+// the Folders (also projects created later). ExcludeProjects always wins.
 type DockerJob struct {
-	// Projects are glob patterns of project names; empty means all.
-	Projects        []string `yaml:"projects,omitempty" json:"projects,omitempty"`
+	// Projects are names or glob patterns of projects to back up.
+	Projects []string `yaml:"projects,omitempty" json:"projects,omitempty"`
+	// Folders include every project whose directory is inside one of them
+	// (for standalone containers: one of their bind mounts), e.g. /srv.
+	// They are also searched for projects without containers.
+	Folders         []string `yaml:"folders,omitempty" json:"folders,omitempty"`
 	ExcludeProjects []string `yaml:"exclude_projects,omitempty" json:"exclude_projects,omitempty"`
 	// ScanDirs are searched for project directories (subdirectories with a
 	// compose file) that have no containers, e.g. /srv/docker.
@@ -191,15 +199,45 @@ type DockerJob struct {
 	Binary string `yaml:"binary,omitempty" json:"binary,omitempty"`
 }
 
-// Selects reports whether the job backs up the named project.
-func (d *DockerJob) Selects(name string) bool {
+// Selects reports whether the job backs up a project. dirs are where the
+// project lives: its directory, or the bind mounts of a standalone container.
+func (d *DockerJob) Selects(name string, dirs ...string) bool {
+	if d == nil || globMatch(d.ExcludeProjects, name) {
+		return false
+	}
+	if len(d.Projects) == 0 && len(d.Folders) == 0 {
+		return true
+	}
+	if globMatch(d.Projects, name) {
+		return true
+	}
+	return d.InFolders(dirs...) != ""
+}
+
+// InFolders returns the first of Folders that contains one of dirs.
+func (d *DockerJob) InFolders(dirs ...string) string {
+	for _, f := range d.Folders {
+		f = filepath.Clean(f)
+		for _, dir := range dirs {
+			if dir == "" {
+				continue
+			}
+			dir = filepath.Clean(dir)
+			if dir == f || strings.HasPrefix(dir, strings.TrimSuffix(f, string(filepath.Separator))+string(filepath.Separator)) {
+				return f
+			}
+		}
+	}
+	return ""
+}
+
+// SearchDirs are the directories searched for projects without containers:
+// ScanDirs (their subdirectories) and Folders (several levels deep).
+func (d *DockerJob) SearchDirs() (shallow, deep []string) {
 	if d == nil {
-		return false
+		return nil, nil
 	}
-	if len(d.Projects) > 0 && !globMatch(d.Projects, name) {
-		return false
-	}
-	return !globMatch(d.ExcludeProjects, name)
+	return d.ScanDirs, d.Folders
 }
 
 // Stops reports whether the project is stopped during its backup.
@@ -623,6 +661,11 @@ func (c *Config) Validate() error {
 			add("job %q: needs at least one path, device or a docker section", j.Name)
 		}
 		if j.Docker != nil {
+			for _, f := range j.Docker.Folders {
+				if !filepath.IsAbs(f) {
+					add("job %q: docker.folders must be absolute paths, got %q", j.Name, f)
+				}
+			}
 			for _, p := range append(append(append([]string{}, j.Docker.Projects...), j.Docker.ExcludeProjects...), j.Docker.Stop...) {
 				if _, err := path.Match(p, ""); err != nil {
 					add("job %q: docker: invalid pattern %q", j.Name, p)

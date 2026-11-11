@@ -47,7 +47,7 @@ func (e *Engine) DockerProjects(ctx context.Context, job *config.Job) ([]docker.
 	if job.Docker == nil {
 		return nil, fmt.Errorf("job %s has no docker section", job.Name)
 	}
-	all, err := DockerClient(job).Projects(ctx, job.Docker.ScanDirs)
+	all, err := DockerClient(job).Projects(ctx, DockerSearch(job))
 	if err != nil {
 		return nil, err
 	}
@@ -56,11 +56,17 @@ func (e *Engine) DockerProjects(ctx context.Context, job *config.Job) ([]docker.
 		if p.Standalone && job.Docker.SkipStandalone {
 			continue
 		}
-		if job.Docker.Selects(p.Name) {
+		if job.Docker.Selects(p.Name, p.Dirs()...) {
 			out = append(out, p)
 		}
 	}
 	return out, nil
+}
+
+// DockerSearch says where a job looks for projects without containers.
+func DockerSearch(job *config.Job) docker.Search {
+	dirs, trees := job.Docker.SearchDirs()
+	return docker.Search{Dirs: dirs, Trees: trees}
 }
 
 // DockerMetaDir is where a project's dumps and inspect output are staged.

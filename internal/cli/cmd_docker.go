@@ -104,7 +104,7 @@ a docker section.`,
 			if err := tw.Flush(); err != nil {
 				return err
 			}
-			if all, vs, err := engine.DockerClient(job).ProjectsAndVolumes(cmd.Context(), job.Docker.ScanDirs); err == nil {
+			if all, vs, err := engine.DockerClient(job).ProjectsAndVolumes(cmd.Context(), engine.DockerSearch(job)); err == nil {
 				if orphans := docker.Orphans(all, vs); len(orphans) > 0 {
 					a.printf("\nvolumes outside every project (not backed up unless listed in the job's paths):\n")
 					for _, v := range orphans {

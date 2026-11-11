@@ -24,7 +24,7 @@ jobs:
     description: Docker Compose projects (one snapshot each) and host data outside them
     repository: storagebox
     docker:
-      scan_dirs: [/srv/docker]               # also projects without running containers
+      folders: [/srv]                        # every project in /srv, also ones created later
     paths:                                   # host data that belongs to no project
       - /srv/docker-archive
       - /srv/dudle
@@ -54,7 +54,7 @@ daemon:
   log_file: /var/log/herakles.log
 
 # Web interface with accounts (passwords, passkeys) behind Traefik:
-# /etc/traefik/dynamic/herakles-backup.yml routes backup.kloeck-it.de here.
+# /etc/traefik/dynamic/herakles-backup.yml routes backup.k-inf1-server.kloeck-it.de here.
 web:
   listen: 192.168.32.1:7480                  # gateway of the Docker network "proxy"
-  url: https://backup.kloeck-it.de
+  url: https://backup.k-inf1-server.kloeck-it.de

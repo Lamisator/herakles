@@ -367,6 +367,7 @@ async function editJob(name) {
   const orig = name ? cfg.jobs.find(j => j.name === name) : null;
   const j = orig ? JSON.parse(JSON.stringify(orig)) : { repository: repos[0].name, schedule: [{ cron: '0 2 * * *', type: 'auto' }], full_interval: '7d', retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 12 } };
   const r = j.retention || {};
+  const dock = dockerPicker(j);
   const f = {
     name: h('input', { value: j.name || '' }), description: h('input', { value: j.description || '' }),
     repository: h('select', {}, repos.map(x => h('option', { value: x.name, selected: x.name === j.repository }, x.name + ' — ' + x.location))),
@@ -382,13 +383,6 @@ async function editJob(name) {
     hooksBefore: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.before)), hooksAfter: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.after)),
     hooksFail: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.on_failure)),
     retryAttempts: h('input', { type: 'number', min: 0, value: (j.retry && j.retry.attempts) || 0 }), retryDelay: h('input', { value: (j.retry && j.retry.delay) || '', placeholder: '10m' }),
-    docker: h('input', { type: 'checkbox', checked: !!j.docker }),
-    dProjects: h('input', { value: ((j.docker && j.docker.projects) || []).join(', '), placeholder: 'all (or e.g. shop, wiki-*)' }),
-    dExclude: h('input', { value: ((j.docker && j.docker.exclude_projects) || []).join(', '), placeholder: 'e.g. portainer' }),
-    dStop: h('input', { value: ((j.docker && j.docker.stop) || []).join(', '), placeholder: 'none (or e.g. zammad)' }),
-    dScan: h('input', { value: ((j.docker && j.docker.scan_dirs) || []).join(', '), placeholder: 'e.g. /srv/docker' }),
-    dSkipDumps: h('input', { type: 'checkbox', checked: j.docker && j.docker.skip_dumps }),
-    dSkipStandalone: h('input', { type: 'checkbox', checked: j.docker && j.docker.skip_standalone }),
   };
   const ret = {};
   for (const k of ['keep_last', 'keep_hourly', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly', 'keep_full'])
@@ -423,12 +417,7 @@ async function editJob(name) {
     h('label', {}, 'Description'), f.description,
     h('fieldset', {}, h('legend', {}, 'Sources'),
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Paths (one per line)'), f.paths), h('div', {}, h('label', {}, 'Disks / partitions as raw images (one per line)'), f.devices))),
-    h('fieldset', {}, h('legend', {}, 'Docker'),
-      h('label', { class: 'check' }, f.docker, 'Back up Docker Compose projects, each as its own snapshot (directory, bind mounts, volumes, database dumps)'),
-      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Projects (comma separated globs)'), f.dProjects), h('div', {}, h('label', {}, 'Except'), f.dExclude)),
-      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Stop during backup (instead of dumps)'), f.dStop), h('div', {}, h('label', {}, 'Also find project directories in'), f.dScan)),
-      h('label', { class: 'check' }, f.dSkipDumps, 'Do not dump databases'),
-      h('label', { class: 'check' }, f.dSkipStandalone, 'Ignore containers that are not part of a Compose project')),
+    dock.el,
     h('fieldset', {}, h('legend', {}, 'Exclusions'),
       h('label', {}, 'Exclude patterns (one per line; *.tmp, **/cache, /abs/path)'), f.exclude,
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Skip dirs containing'), f.excludeIfPresent), h('div', {}, h('label', {}, 'Skip files larger than'), f.excludeLarger)),
@@ -469,9 +458,8 @@ async function editJob(name) {
       for (const k of ['keep_within', 'keep_within_daily', 'keep_within_weekly', 'keep_within_monthly']) nr[k] = ret[k].value.trim() || '0';
       for (const k of ['keep_within_hourly', 'keep_within_yearly']) nr[k] = r[k] || '0';
       nj.retention = nr;
-      const csv = el => el.value.split(',').map(x => x.trim()).filter(Boolean);
-      nj.docker = f.docker.checked ? Object.assign({}, j.docker || {}, { projects: csv(f.dProjects), exclude_projects: csv(f.dExclude),
-        stop: csv(f.dStop), scan_dirs: csv(f.dScan), skip_dumps: f.dSkipDumps.checked, skip_standalone: f.dSkipStandalone.checked }) : null;
+      nj.docker = dock.value();
+      if (!nj.docker && !nj.paths.length && !nj.devices.length) { toast('Choose paths, disks or Docker projects to back up', true); return false; }
       const c = await loadConfig();
       c.jobs = c.jobs || [];
       const i = orig ? c.jobs.findIndex(x => x.name === orig.name) : -1;
@@ -479,6 +467,117 @@ async function editJob(name) {
       await saveConfig(c);
       navigate(state.view);
     } }]);
+}
+
+// Docker part of the job editor: choose projects by ticking them, or by
+// folders that include every project inside them (also future ones).
+const globRe = g => new RegExp('^' + g.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+const isGlob = p => /[*?[]/.test(p);
+const globMatch = (pats, n) => (pats || []).some(p => globRe(p).test(n));
+function inFolders(folders, dirs) {
+  for (let f of folders) {
+    f = f.replace(/\/+$/, '') || '/';
+    if ((dirs || []).some(d => d === f || d.startsWith(f === '/' ? '/' : f + '/'))) return f;
+  }
+  return '';
+}
+
+function dockerPicker(j) {
+  const d = j.docker || {};
+  const csv = v => v.split(',').map(x => x.trim()).filter(Boolean);
+  const enabled = h('input', { type: 'checkbox', checked: !!j.docker });
+  const modeAll = h('input', { type: 'radio', name: 'dmode', checked: !(d.projects && d.projects.length) && !(d.folders && d.folders.length) });
+  const modePick = h('input', { type: 'radio', name: 'dmode', checked: !modeAll.checked });
+  const folders = h('input', { value: (d.folders || []).join(', '), placeholder: 'e.g. /srv' });
+  const scan = h('input', { value: (d.scan_dirs || []).join(', '), placeholder: 'e.g. /srv/docker' });
+  const skipDumps = h('input', { type: 'checkbox', checked: d.skip_dumps });
+  const skipStandalone = h('input', { type: 'checkbox', checked: d.skip_standalone });
+  const list = h('div', { class: 'dock-list' });
+  const body = h('div');
+  // Per project: included / stopped, remembered across list reloads.
+  const chosen = {}, stopped = {};
+  let projects = [];
+  const included = p => {
+    if (p.name in chosen) return chosen[p.name];
+    if (globMatch(d.exclude_projects, p.name)) return false;
+    if (modeAll.checked) return true;
+    return globMatch(d.projects, p.name) || !!inFolders(csv(folders.value), p.dirs);
+  };
+  const render = () => {
+    clear(list);
+    if (!projects.length) { list.append(h('div', { class: 'muted' }, 'No containers or project directories found.')); return; }
+    list.append(h('table', {}, h('tr', {}, h('th', {}, 'Back up'), h('th', {}, 'Project'), h('th', {}, 'Containers'), h('th', {}, 'Stop during backup')),
+      projects.map(p => {
+        const via = !modeAll.checked ? inFolders(csv(folders.value), p.dirs) : '';
+        const cb = h('input', { type: 'checkbox', style: 'width:auto', checked: included(p), onchange: e => { chosen[p.name] = e.target.checked; } });
+        const st = h('input', { type: 'checkbox', style: 'width:auto', checked: p.name in stopped ? stopped[p.name] : globMatch(d.stop, p.name),
+          onchange: e => { stopped[p.name] = e.target.checked; } });
+        return h('tr', {}, h('td', {}, cb),
+          h('td', {}, h('b', {}, p.name), p.standalone ? h('span', { class: 'chip' }, 'standalone') : null, via ? h('span', { class: 'chip' }, 'in ' + via) : null,
+            h('div', { class: 'meta mono' }, p.working_dir || (p.dirs || []).join(', '))),
+          h('td', {}, p.containers.length ? p.running + '/' + p.containers.length + ' running' : 'directory only',
+            p.databases && p.databases.length ? h('div', { class: 'meta' }, p.databases.join(', ')) : null),
+          h('td', {}, st));
+      })));
+  };
+  let timer;
+  const load = async () => {
+    clear(list).append(h('div', { class: 'muted' }, 'Looking for containers…'));
+    try {
+      const q = new URLSearchParams({ job: j.name || '', folders: folders.value, scan: scan.value });
+      projects = await api('GET', '/api/docker/host?' + q);
+      render();
+    } catch (e) { clear(list).append(h('div', { class: 'muted' }, 'Could not list the containers on this host: ' + e.message)); }
+  };
+  const sync = () => {
+    body.hidden = !enabled.checked;
+    folders.closest('div').hidden = modeAll.checked;
+    Object.keys(chosen).forEach(k => delete chosen[k]); // a mode change re-applies the rules
+    render();
+  };
+  enabled.addEventListener('change', () => { sync(); if (enabled.checked && !projects.length) load(); });
+  modeAll.addEventListener('change', sync); modePick.addEventListener('change', sync);
+  folders.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 500); });
+  scan.addEventListener('change', load);
+  body.append(
+    h('label', { class: 'check' }, modeAll, 'All projects on this host (new ones are included automatically); untick projects to leave them out'),
+    h('label', { class: 'check' }, modePick, 'Only the projects I choose'),
+    h('div', {}, h('label', {}, 'Also include every project in these folders automatically, including ones created later (comma separated)'), folders),
+    list,
+    h('details', {}, h('summary', {}, 'More options'),
+      h('label', {}, 'Also look for project directories without containers in'), scan,
+      h('label', { class: 'check' }, skipDumps, 'Do not dump databases (Postgres, MySQL/MariaDB, MongoDB)'),
+      h('label', { class: 'check' }, skipStandalone, 'Ignore containers that are not part of a Compose project'),
+      (d.projects || []).concat(d.exclude_projects || []).some(isGlob)
+        ? h('div', { class: 'meta' }, 'Patterns from the configuration are kept: ', [...(d.projects || []), ...(d.exclude_projects || [])].filter(isGlob).join(', ')) : null));
+  const el = h('fieldset', {}, h('legend', {}, 'Docker'),
+    h('label', { class: 'check' }, enabled, 'Back up Docker containers: each Compose project becomes its own snapshot (directory, bind mounts, volumes, database dumps)'),
+    body);
+  sync();
+  if (enabled.checked) load();
+  return {
+    el,
+    value() {
+      if (!enabled.checked) return null;
+      const keepGlobs = a => (a || []).filter(isGlob);
+      const fs = modeAll.checked ? [] : csv(folders.value);
+      const names = projects.map(p => p.name);
+      const out = Object.assign({}, d, { folders: fs, scan_dirs: csv(scan.value), skip_dumps: skipDumps.checked, skip_standalone: skipStandalone.checked,
+        projects: keepGlobs(d.projects), exclude_projects: keepGlobs(d.exclude_projects).concat((d.exclude_projects || []).filter(x => !isGlob(x) && !names.includes(x))),
+        stop: keepGlobs(d.stop).concat((d.stop || []).filter(x => !isGlob(x) && !names.includes(x))) });
+      if (!modeAll.checked) out.projects = out.projects.concat((d.projects || []).filter(x => !isGlob(x) && !names.includes(x)));
+      for (const p of projects) {
+        const on = included(p);
+        const byRule = modeAll.checked ? !globMatch(out.exclude_projects, p.name) : !!inFolders(fs, p.dirs) || globMatch(out.projects, p.name);
+        if (on && !byRule && !modeAll.checked) out.projects.push(p.name);
+        if (!on && byRule) out.exclude_projects.push(p.name);
+        const stop = p.name in stopped ? stopped[p.name] : globMatch(d.stop, p.name);
+        if (stop && !globMatch(out.stop, p.name)) out.stop.push(p.name);
+      }
+      if (modePick.checked && !out.projects.length && !out.folders.length) throw new Error('Choose at least one project or folder, or select "All projects"');
+      return out;
+    },
+  };
 }
 
 // ---------- repositories ----------

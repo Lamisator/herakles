@@ -196,6 +196,23 @@ func Orphans(ps []Project, vs []Volume) []Volume {
 	return out
 }
 
+// Dirs returns where the project lives: its directory, or for a standalone
+// container the sources of its bind mounts.
+func (p Project) Dirs() []string {
+	if !p.Standalone {
+		return []string{p.WorkingDir}
+	}
+	var out []string
+	for _, c := range p.Containers {
+		for _, m := range c.Mounts {
+			if m.Type == "bind" && m.Source != "" {
+				out = append(out, m.Source)
+			}
+		}
+	}
+	return out
+}
+
 // Running reports how many containers are running.
 func (p Project) Running() int {
 	n := 0
@@ -310,38 +327,64 @@ func ProjectName(dir string) string {
 
 // ScanDirs finds project directories (direct subdirectories of dirs that
 // contain a compose file).
-func ScanDirs(dirs []string) []Project {
+func ScanDirs(dirs []string) []Project { return ScanTree(dirs, 1) }
+
+// ScanTree finds project directories up to depth levels below dirs. It does
+// not descend into hidden directories or below a project directory.
+func ScanTree(dirs []string, depth int) []Project {
 	var out []Project
-	for _, d := range dirs {
-		entries, err := os.ReadDir(d)
+	var walk func(dir string, level int)
+	walk = func(dir string, level int) {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue
+			return
 		}
 		for _, e := range entries {
-			if !e.IsDir() {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
-			dir := filepath.Join(d, e.Name())
-			for _, f := range composeFiles {
-				if st, err := os.Stat(filepath.Join(dir, f)); err == nil && st.Mode().IsRegular() {
-					out = append(out, Project{Name: ProjectName(dir), WorkingDir: dir, ConfigFiles: []string{filepath.Join(dir, f)}})
-					break
-				}
+			sub := filepath.Join(dir, e.Name())
+			if f := composeFile(sub); f != "" {
+				out = append(out, Project{Name: ProjectName(sub), WorkingDir: sub, ConfigFiles: []string{f}})
+				continue
+			}
+			if level < depth {
+				walk(sub, level+1)
 			}
 		}
+	}
+	for _, d := range dirs {
+		walk(d, 1)
 	}
 	return out
 }
 
+func composeFile(dir string) string {
+	for _, f := range composeFiles {
+		if st, err := os.Stat(filepath.Join(dir, f)); err == nil && st.Mode().IsRegular() {
+			return filepath.Join(dir, f)
+		}
+	}
+	return ""
+}
+
+// Search says where to look for project directories without containers:
+// the subdirectories of Dirs and up to three levels below Trees.
+type Search struct {
+	Dirs  []string
+	Trees []string
+}
+
 // Projects discovers all projects: those with containers plus project
-// directories under scanDirs that have none, with their labelled volumes.
-func (c *Client) Projects(ctx context.Context, scanDirs []string) ([]Project, error) {
-	ps, _, err := c.ProjectsAndVolumes(ctx, scanDirs)
+// directories found by the search that have none, with their labelled
+// volumes.
+func (c *Client) Projects(ctx context.Context, search Search) ([]Project, error) {
+	ps, _, err := c.ProjectsAndVolumes(ctx, search)
 	return ps, err
 }
 
 // ProjectsAndVolumes is Projects plus the list of all volumes.
-func (c *Client) ProjectsAndVolumes(ctx context.Context, scanDirs []string) ([]Project, []Volume, error) {
+func (c *Client) ProjectsAndVolumes(ctx context.Context, search Search) ([]Project, []Volume, error) {
 	cs, err := c.Containers(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -358,9 +401,10 @@ func (c *Client) ProjectsAndVolumes(ctx context.Context, scanDirs []string) ([]P
 			known["dir:"+filepath.Clean(p.WorkingDir)] = true
 		}
 	}
-	for _, p := range ScanDirs(scanDirs) {
+	for _, p := range append(ScanDirs(search.Dirs), ScanTree(search.Trees, 3)...) {
 		if !known[p.Name] && !known["dir:"+filepath.Clean(p.WorkingDir)] {
 			ps = append(ps, p)
+			known[p.Name], known["dir:"+filepath.Clean(p.WorkingDir)] = true, true
 		}
 	}
 	sort.Slice(ps, func(i, j int) bool { return ps[i].Name < ps[j].Name })
