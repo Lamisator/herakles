@@ -213,6 +213,18 @@ func (e *Engine) RestoreProject(ctx context.Context, unitName string, o ProjectR
 		return 0
 	})
 	res.Paths = roots
+	// Never replace the directory of another project: older snapshots of a
+	// project that bind-mounts a parent directory (e.g. a deploy tool with
+	// /srv/docker) contain other projects.
+	if all, _, err := e.dockerProjects(ctx, job); err == nil {
+		for _, root := range roots {
+			for _, q := range all {
+				if q.Name != info.Project && q.WorkingDir != "" && within(filepath.Clean(q.WorkingDir), root) {
+					return nil, fmt.Errorf("%s contains project %s (%s); restoring it in place would replace that project too. Extract it with --target instead", root, q.Name, q.WorkingDir)
+				}
+			}
+		}
+	}
 	if o.DryRun {
 		return res, nil
 	}

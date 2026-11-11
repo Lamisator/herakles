@@ -475,6 +475,26 @@ type DataOptions struct {
 	SkipBindMounts bool
 	// Lstat is used to skip missing paths and sockets (tests replace it).
 	Lstat func(string) (os.FileInfo, error)
+	// Others are the directories of the other projects: a bind mount that
+	// contains one (e.g. a deploy tool mounting /srv/docker) is not part of
+	// this project's data, or restoring the project would replace theirs.
+	Others []string
+}
+
+// DataSets computes the data of every project, each knowing the others.
+func DataSets(all []Project, o DataOptions) map[string]DataSet {
+	out := map[string]DataSet{}
+	for i, p := range all {
+		oo := o
+		oo.Others = nil
+		for j, q := range all {
+			if j != i && q.WorkingDir != "" && filepath.Clean(q.WorkingDir) != filepath.Clean(p.WorkingDir) {
+				oo.Others = append(oo.Others, filepath.Clean(q.WorkingDir))
+			}
+		}
+		out[p.Name] = p.Data(oo)
+	}
+	return out
 }
 
 // DataSet is the host data of a project.
@@ -485,6 +505,18 @@ type DataSet struct {
 	Volumes map[string]string `json:"volumes,omitempty"`
 	// Binds are bind-mounted host paths outside the project directory.
 	Binds []string `json:"binds,omitempty"`
+	// Shared are bind mounts left out because they contain other projects.
+	Shared []string `json:"shared,omitempty"`
+}
+
+// containsAny reports whether dir is or contains one of dirs.
+func containsAny(dir string, dirs []string) bool {
+	for _, d := range dirs {
+		if within(d, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // Data returns the host paths holding the project's data.
@@ -519,6 +551,10 @@ func (p Project) Data(o DataOptions) DataSet {
 					continue
 				}
 				src := filepath.Clean(m.Source)
+				if containsAny(src, o.Others) {
+					ds.Shared = append(ds.Shared, src)
+					continue
+				}
 				if p.WorkingDir == "" || !within(src, filepath.Clean(p.WorkingDir)) {
 					ds.Binds = append(ds.Binds, src)
 				}
@@ -536,6 +572,7 @@ func (p Project) Data(o DataOptions) DataSet {
 	}
 	ds.Paths = topLevel(paths)
 	ds.Binds = topLevel(ds.Binds)
+	ds.Shared = topLevel(ds.Shared)
 	return ds
 }
 

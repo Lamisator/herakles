@@ -315,3 +315,51 @@ func TestDockerFoldersIncludeNewProjects(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestDockerSharedBindMount(t *testing.T) {
+	ctx := context.Background()
+	d := setupDocker(t)
+	srv := filepath.Dir(d.wd)
+	// A deploy tool mounts the directory holding all projects.
+	tool := filepath.Join(srv, "deployer")
+	write(t, filepath.Join(tool, "compose.yml"), "services: {}\n")
+	cs := []dockertest.Container{
+		{Name: "shop-web-1", Image: "nginx", Project: "shop", Service: "web", WorkingDir: d.wd, ConfigFiles: []string{filepath.Join(d.wd, "compose.yml")}, Running: true},
+		{Name: "deployer", Image: "tool", Project: "deployer", Service: "app", WorkingDir: tool, ConfigFiles: []string{filepath.Join(tool, "compose.yml")}, Running: true,
+			Mounts: []docker.Mount{{Type: "bind", Source: srv, Destination: "/stacks"}}},
+	}
+	d.fake.Set(cs...)
+	res, err := d.e.RunJob(ctx, "containers/deployer", RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snaps, _ := d.e.ProjectSnapshots(ctx, "containers/deployer")
+	for _, p := range snaps[0].Paths {
+		if p == srv {
+			t.Fatalf("the shared bind mount %s must not be part of the project: %v (%+v)", srv, snaps[0].Paths, res.Projects)
+		}
+	}
+	if _, err := d.e.RestoreProject(ctx, "containers/deployer", ProjectRestoreOptions{DryRun: true}); err != nil {
+		t.Fatal("current snapshot must be restorable:", err)
+	}
+	// A snapshot that contains another project (as older versions made) is
+	// refused for in-place restores, but can still be extracted.
+	repo, _, err := d.e.OpenByName(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := d.e.Config().Job("containers")
+	_, err = d.e.backupUnit(ctx, repo, job, unit{Name: "containers/deployer", Paths: []string{srv},
+		Docker: &repository.DockerInfo{Project: "deployer", WorkingDir: tool}}, RunOptions{}, d.e.Log)
+	repo.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.e.RestoreProject(ctx, "containers/deployer", ProjectRestoreOptions{DryRun: true})
+	if err == nil || !strings.Contains(err.Error(), "contains project") {
+		t.Fatal("old snapshot covering other projects must be refused:", err)
+	}
+	if _, err := d.e.RestoreProject(ctx, "containers/deployer", ProjectRestoreOptions{Target: t.TempDir()}); err != nil {
+		t.Fatal("extracting it with a target must work:", err)
+	}
+}

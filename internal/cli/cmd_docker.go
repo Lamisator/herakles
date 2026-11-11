@@ -38,10 +38,11 @@ a docker section.`,
 			if err != nil {
 				return err
 			}
-			ps, err := a.eng.DockerProjects(cmd.Context(), job)
+			all, ps, err := a.eng.DockerProjectsAll(cmd.Context(), job)
 			if err != nil {
 				return err
 			}
+			sets := docker.DataSets(all, engine.DockerDataOptions(job))
 			last := map[string]*repository.Snapshot{}
 			if withRepo {
 				repo, _, err := a.openRepo(cmd.Context(), job.Repository)
@@ -68,7 +69,7 @@ a docker section.`,
 				}
 				var rows []row
 				for _, p := range ps {
-					rows = append(rows, row{Project: p, Data: p.Data(dataOpts(job)), Databases: databases(p), LastSnapshot: last[job.Name+"/"+p.Name]})
+					rows = append(rows, row{Project: p, Data: sets[p.Name], Databases: databases(p), LastSnapshot: last[job.Name+"/"+p.Name]})
 				}
 				return a.printJSON(rows)
 			}
@@ -91,7 +92,7 @@ a docker section.`,
 					kind = " (standalone)"
 				}
 				line := fmt.Sprintf("%s%s\t%d/%d running\t%s\t%d\t%s", p.Name, kind, p.Running(), len(p.Containers),
-					dash(strings.Join(databases(p), ", ")), len(p.Data(dataOpts(job)).Paths), mode)
+					dash(strings.Join(databases(p), ", ")), len(sets[p.Name].Paths), mode)
 				if withRepo {
 					if s := last[job.Name+"/"+p.Name]; s != nil {
 						line += fmt.Sprintf("\t%s (%s, %s)", ui.Time(s.Time), s.Type, s.ID().Short())
@@ -130,15 +131,16 @@ a docker section.`,
 			if err != nil {
 				return err
 			}
-			ps, err := a.eng.DockerProjects(cmd.Context(), job)
+			all, ps, err := a.eng.DockerProjectsAll(cmd.Context(), job)
 			if err != nil {
 				return err
 			}
+			sets := docker.DataSets(all, engine.DockerDataOptions(job))
 			for _, p := range ps {
 				if p.Name != name {
 					continue
 				}
-				ds := p.Data(dataOpts(job))
+				ds := sets[p.Name]
 				if a.jsonOut {
 					return a.printJSON(map[string]any{"project": p, "data": ds, "databases": databases(p)})
 				}
@@ -162,6 +164,9 @@ a docker section.`,
 				}
 				for _, b := range ds.Binds {
 					a.printf("  bind mount: %s\n", b)
+				}
+				for _, b := range ds.Shared {
+					a.printf("  not included: %s (contains other projects, which are backed up on their own)\n", b)
 				}
 				a.printf("  backed up:  %s\n", strings.Join(ds.Paths, ", "))
 				return nil
@@ -283,10 +288,6 @@ Docker is not touched (to inspect a snapshot or move it elsewhere).`,
 	backup.Flags().StringVarP(&typ, "type", "t", "auto", "backup type: auto, full, incremental, differential")
 	cmd.AddCommand(ls, show, backup, restore)
 	return cmd
-}
-
-func dataOpts(job *config.Job) docker.DataOptions {
-	return docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}
 }
 
 func databases(p docker.Project) []string {

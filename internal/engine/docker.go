@@ -48,6 +48,20 @@ func (e *Engine) DockerProjects(ctx context.Context, job *config.Job) ([]docker.
 	return sel, err
 }
 
+// DockerProjectsAll returns all projects found for the job and the selected
+// ones; data sets must be computed over all of them (docker.DataSets).
+func (e *Engine) DockerProjectsAll(ctx context.Context, job *config.Job) (all, selected []docker.Project, err error) {
+	return e.dockerProjects(ctx, job)
+}
+
+// DockerDataOptions are the data options of a docker job.
+func DockerDataOptions(job *config.Job) docker.DataOptions {
+	if job.Docker == nil {
+		return docker.DataOptions{}
+	}
+	return docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}
+}
+
 // dockerProjects returns all projects found for the job and the selected ones.
 func (e *Engine) dockerProjects(ctx context.Context, job *config.Job) (all, out []docker.Project, err error) {
 	if job.Docker == nil {
@@ -83,9 +97,8 @@ func Remainder(job *config.Job, all []docker.Project) (paths, excludes []string)
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	opts := docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}
-	for _, p := range all {
-		for _, d := range p.Data(opts).Paths {
+	for _, ds := range docker.DataSets(all, DockerDataOptions(job)) {
+		for _, d := range ds.Paths {
 			if job.Docker.InFolders(d) != "" {
 				excludes = append(excludes, globEscape(d))
 			}
@@ -150,8 +163,9 @@ func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *confi
 	}
 	forgotten := 0
 	var failed, warned []string
+	sets := docker.DataSets(all, DockerDataOptions(job))
 	for _, p := range projects {
-		pr := e.backupProject(ctx, repo, job, p, ro, log.With("project", p.Name))
+		pr := e.backupProject(ctx, repo, job, p, sets[p.Name], ro, log.With("project", p.Name))
 		res.Projects = append(res.Projects, pr)
 		add(pr.Summary)
 		forgotten += pr.Forgotten
@@ -208,7 +222,7 @@ func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *confi
 
 // backupProject dumps the project's databases (or stops it), then saves its
 // directory, bind mounts, volumes and the dumps as one snapshot.
-func (e *Engine) backupProject(ctx context.Context, repo *repository.Repository, job *config.Job, p docker.Project, ro RunOptions, log *slog.Logger) ProjectResult {
+func (e *Engine) backupProject(ctx context.Context, repo *repository.Repository, job *config.Job, p docker.Project, ds docker.DataSet, ro RunOptions, log *slog.Logger) ProjectResult {
 	pr := ProjectResult{Project: p.Name, Status: "success"}
 	fail := func(err error) ProjectResult {
 		pr.Status, pr.Error = "failure", err.Error()
@@ -217,7 +231,9 @@ func (e *Engine) backupProject(ctx context.Context, repo *repository.Repository,
 	}
 	dc := DockerClient(job)
 	opts := job.Docker
-	ds := p.Data(docker.DataOptions{SkipVolumes: opts.SkipVolumes, SkipBindMounts: opts.SkipBindMounts})
+	for _, sh := range ds.Shared {
+		log.Info("bind mount contains other projects; they are backed up on their own", "path", sh)
+	}
 	info := &repository.DockerInfo{Project: p.Name, Standalone: p.Standalone, WorkingDir: p.WorkingDir,
 		ConfigFiles: p.ConfigFiles, Volumes: ds.Volumes, Binds: ds.Binds}
 	var running []string

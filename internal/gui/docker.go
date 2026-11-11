@@ -213,12 +213,13 @@ func (s *Server) dockerList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		jv := dockerJobView{Job: job.Name, Repository: job.Repository, Projects: []projectView{}}
-		ps, err := s.eng.DockerProjects(r.Context(), job)
+		all, ps, err := s.eng.DockerProjectsAll(r.Context(), job)
 		if err != nil {
 			jv.Error = err.Error()
 			out = append(out, jv)
 			continue
 		}
+		sets := docker.DataSets(all, engine.DockerDataOptions(job))
 		snaps, err := s.jobSnapshots(r, job)
 		if err != nil {
 			s.fail(w, err, job.Repository)
@@ -235,7 +236,7 @@ func (s *Server) dockerList(w http.ResponseWriter, r *http.Request) {
 					pv.Databases = append(pv.Databases, c.Name+" ("+string(k)+")")
 				}
 			}
-			pv.Paths = p.Data(docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}).Paths
+			pv.Paths = sets[p.Name].Paths
 			switch {
 			case job.Docker.Stops(p.Name):
 				pv.Mode = "stop"
