@@ -203,3 +203,6 @@ func (l *Local) List(ctx context.Context, t FileType, fn func(FileInfo) error) e
 
 // Close implements Backend.
 func (l *Local) Close() error { return nil }
+
+// FilePath returns the filesystem path of a handle (used by the server).
+func (l *Local) FilePath(h Handle) string { return l.path(h) }
