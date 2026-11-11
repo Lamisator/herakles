@@ -20,8 +20,10 @@ require (
 )
 
 require (
+	fyne.io/systray v1.12.2 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect

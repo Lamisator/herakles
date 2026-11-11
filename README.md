@@ -7,6 +7,7 @@ It ships as a single static binary for Linux and Windows. That one binary contai
 * a command line interface (`herakles …`),
 * a curses‑style terminal UI (`herakles tui`),
 * a graphical desktop UI (`herakles gui`),
+* a tray icon that runs the daemon and the GUI on your desktop (`herakles tray`),
 * a background daemon/service for scheduled backups (`herakles daemon`),
 * the repository server (`herakles server`).
 
@@ -156,7 +157,7 @@ Useful commands: `config validate`, `config show` (secrets redacted), `config ed
 ```
 herakles init | backup | jobs | snapshots | ls | find | diff | restore | restore-device | dump
          forget | prune | check | stats | copy | key | unlock | repair index
-         config | daemon | server | tui | gui | version
+         config | daemon | server | tui | gui | tray | version
 ```
 
 Every command has `--help` with examples. `--json` gives machine‑readable output. Exit codes: `0` ok, `1` error, `3` backup finished but some files could not be read.
@@ -180,6 +181,22 @@ The GUI is served only on `127.0.0.1` and protected by a random session token, C
 * **Backup Jobs**: full editor for sources, exclusions, schedules (with presets), retention, hooks and retries.
 * **Repositories**: add/edit (local, SMB, SFTP, server), encryption/password source, key file, bandwidth limits, maintenance schedules, initialize, check, prune, statistics.
 * **Configuration**: YAML editor that keeps comments. **Activity Log**: history and messages.
+
+### Tray icon: `herakles tray`
+
+On a desktop this is the easiest way to run Herakles. One process runs the daemon (scheduled backups and the control API) and the GUI, and shows an icon in the system tray. The icon's menu shows the current status and offers **Open Herakles** and **Quit Herakles**; a left click also opens the window. A badge on the icon shows when a backup is running (blue), a repository needs its password (amber) or the last backup of a job failed (red).
+
+```sh
+herakles tray                 # run it now (add --open to open the window right away)
+herakles tray install         # start it at login + add "Herakles Backup" to the applications menu
+herakles tray uninstall
+```
+
+* Starting it a second time (e.g. from the applications menu) opens the window of the running instance.
+* Unlike the system service, it does not need a stored password: a repository without a password source shows as locked until you unlock it in the GUI; scheduled backups then use the password until you quit.
+* Linux: works with every desktop that supports StatusNotifierItem tray icons (KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar, …). On GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. If the panel starts after Herakles, the icon appears as soon as it is ready. Without a desktop session, it keeps running as daemon + GUI and prints the GUI URL.
+* Windows: `tray install` adds it to `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login.
+* Run either the tray or the daemon service, not both: they share the control port.
 
 ### Daemon
 
@@ -267,6 +284,7 @@ The suite covers:
 * backup/restore round trips, incremental detection, excludes and device images;
 * retention, configuration, the job engine (hooks, notifications, copy), the server (auth, ACL, append‑only, quota) and the daemon (scheduler, retries, catch‑up, control API);
 * CLI end‑to‑end workflows, the TUI (simulated terminal) and the GUI API.
+* Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 
 ## Current limitations
 

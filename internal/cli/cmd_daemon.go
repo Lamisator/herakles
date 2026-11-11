@@ -233,31 +233,42 @@ func (a *App) daemonLogger(buf *daemon.LogBuffer) (*slog.Logger, io.Closer, erro
 }
 
 func (a *App) runDaemon(ctx context.Context) error {
-	if len(a.cfg.Jobs) == 0 {
-		fmt.Fprintf(a.err, "warning: no jobs configured in %s\n", a.cfg.Path())
-	}
 	for _, rc := range a.cfg.Repositories {
 		if !rc.HasCredentialSource() {
 			return fmt.Errorf("repository %s has no non-interactive password source; the daemon cannot prompt (set password_file, password_env, password_command or key_file)", rc.Name)
 		}
 	}
-	buf := daemon.NewLogBuffer(1000)
-	log, closer, err := a.daemonLogger(buf)
+	d, closer, err := a.newDaemon(ctx)
 	if err != nil {
 		return err
 	}
 	defer closer.Close()
+	return d.Run(ctx)
+}
+
+// newDaemon sets up logging and creates the daemon; it reloads the
+// configuration on SIGHUP until ctx ends.
+func (a *App) newDaemon(ctx context.Context) (*daemon.Daemon, io.Closer, error) {
+	if len(a.cfg.Jobs) == 0 {
+		fmt.Fprintf(a.err, "warning: no jobs configured in %s\n", a.cfg.Path())
+	}
+	buf := daemon.NewLogBuffer(1000)
+	log, closer, err := a.daemonLogger(buf)
+	if err != nil {
+		return nil, nil, err
+	}
 	a.eng.Log = log
 	a.eng.Prompt = nil
 	path := a.cfg.Path()
 	d, err := daemon.New(ctx, a.eng, daemon.Options{Version: Version, Logs: buf, Reload: func() (*config.Config, error) { return config.Load(path) }})
 	if err != nil {
-		return err
+		closer.Close()
+		return nil, nil, err
 	}
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
-	defer signal.Stop(hup)
 	go func() {
+		defer signal.Stop(hup)
 		for {
 			select {
 			case <-hup:
@@ -269,7 +280,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 			}
 		}
 	}()
-	return d.Run(ctx)
+	return d, closer, nil
 }
 
 func (a *App) serverCmd() *cobra.Command {

@@ -33,6 +33,7 @@ type Daemon struct {
 	Version   string
 	token     string
 	addr      string
+	ln        net.Listener
 	reload    func() (*config.Config, error)
 }
 
@@ -74,12 +75,27 @@ func New(ctx context.Context, eng *engine.Engine, opts Options) (*Daemon, error)
 	return d, nil
 }
 
-// Run starts the scheduler and the control API and blocks until ctx ends.
-func (d *Daemon) Run(ctx context.Context) error {
+// Listen opens the control API port. Run calls it when needed; calling it
+// first reports a busy port (usually another running daemon) before
+// anything else is started.
+func (d *Daemon) Listen() error {
+	if d.ln != nil {
+		return nil
+	}
 	ln, err := net.Listen("tcp", d.addr)
 	if err != nil {
 		return fmt.Errorf("control API: %w", err)
 	}
+	d.ln = ln
+	return nil
+}
+
+// Run starts the scheduler and the control API and blocks until ctx ends.
+func (d *Daemon) Run(ctx context.Context) error {
+	if err := d.Listen(); err != nil {
+		return err
+	}
+	ln := d.ln
 	tp := TokenPath(d.Engine.Config())
 	if err := os.MkdirAll(filepath.Dir(tp), 0o700); err != nil {
 		ln.Close()

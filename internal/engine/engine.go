@@ -89,6 +89,30 @@ func (e *Engine) Credentials(rc *config.Repository) (crypto.Credentials, error) 
 	return c, err
 }
 
+// Locked lists the configured repositories used by jobs that have no
+// credential source and no remembered credentials, i.e. that cannot be
+// opened without asking for a password.
+func (e *Engine) Locked() []string {
+	cfg := e.Config()
+	used := map[string]bool{}
+	for _, j := range cfg.Jobs {
+		used[j.Repository] = true
+	}
+	var out []string
+	for _, rc := range cfg.Repositories {
+		if !used[rc.Name] || rc.HasCredentialSource() {
+			continue
+		}
+		e.credMu.Lock()
+		c, ok := e.creds[rc.Name]
+		e.credMu.Unlock()
+		if !ok || c.Empty() {
+			out = append(out, rc.Name)
+		}
+	}
+	return out
+}
+
 // RepoConfig finds a repository by name or treats the argument as a location.
 func (e *Engine) RepoConfig(nameOrLocation string) (*config.Repository, error) {
 	if rc := e.Config().Repo(nameOrLocation); rc != nil {

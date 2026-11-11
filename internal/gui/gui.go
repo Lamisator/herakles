@@ -40,6 +40,10 @@ type Options struct {
 	OpenBrowser bool
 	Version     string
 	Out         io.Writer
+	// Runner and Logs let the GUI share a daemon's task runner and log
+	// buffer (tray mode). If nil, the GUI uses its own and discards logs.
+	Runner *daemon.Runner
+	Logs   *daemon.LogBuffer
 }
 
 // Server is the GUI backend.
@@ -54,12 +58,23 @@ type Server struct {
 
 // NewServer creates the GUI backend.
 func NewServer(ctx context.Context, eng *engine.Engine, version string) *Server {
+	return newServer(ctx, eng, Options{Version: version})
+}
+
+func newServer(ctx context.Context, eng *engine.Engine, opts Options) *Server {
 	tok := make([]byte, 24)
 	_, _ = rand.Read(tok)
-	logs := daemon.NewLogBuffer(1000)
-	eng.Log = slog.New(daemon.NewTeeHandler(slog.NewTextHandler(io.Discard, nil), logs))
+	logs := opts.Logs
+	if logs == nil {
+		logs = daemon.NewLogBuffer(1000)
+		eng.Log = slog.New(daemon.NewTeeHandler(slog.NewTextHandler(io.Discard, nil), logs))
+	}
+	runner := opts.Runner
+	if runner == nil {
+		runner = daemon.NewRunner(ctx, eng, 2)
+	}
 	eng.Prompt = nil
-	return &Server{eng: eng, runner: daemon.NewRunner(ctx, eng, 2), logs: logs, token: hex.EncodeToString(tok), version: version, ctx: ctx}
+	return &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx}
 }
 
 // Token returns the session token.
@@ -67,46 +82,67 @@ func (s *Server) Token() string { return s.token }
 
 // Run serves the GUI until ctx is cancelled.
 func Run(ctx context.Context, eng *engine.Engine, opts Options) error {
-	if opts.Listen == "" {
-		opts.Listen = "127.0.0.1:7478"
-	}
 	if opts.Out == nil {
 		opts.Out = os.Stderr
 	}
-	host, _, err := net.SplitHostPort(opts.Listen)
+	inst, err := Start(ctx, eng, opts)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(opts.Out, "Herakles GUI running at %s\nPress Ctrl+C to quit.\n", inst.URL)
+	if opts.OpenBrowser {
+		if err := OpenWindow(inst.URL); err != nil {
+			fmt.Fprintf(opts.Out, "could not open a browser window (%v); open the URL above manually\n", err)
+		}
+	}
+	<-ctx.Done()
+	return inst.Shutdown()
+}
+
+// Instance is a running GUI server.
+type Instance struct {
+	// URL opens the GUI; it carries the session token.
+	URL string
+	srv *http.Server
+}
+
+// Shutdown stops the server, waiting up to five seconds for requests.
+func (i *Instance) Shutdown() error {
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return i.srv.Shutdown(sctx)
+}
+
+// Start serves the GUI in the background. It only listens on loopback
+// addresses; if the port is taken, a free one is chosen.
+func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, error) {
+	if opts.Listen == "" {
+		opts.Listen = "127.0.0.1:7478"
+	}
+	host, _, err := net.SplitHostPort(opts.Listen)
+	if err != nil {
+		return nil, err
+	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return fmt.Errorf("the GUI only listens on loopback addresses (got %s)", opts.Listen)
+		return nil, fmt.Errorf("the GUI only listens on loopback addresses (got %s)", opts.Listen)
 	}
 	ln, err := net.Listen("tcp", opts.Listen)
 	if err != nil {
 		// Port busy (e.g. a second instance): pick a free one.
 		ln, err = net.Listen("tcp", net.JoinHostPort(host, "0"))
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	s := NewServer(ctx, eng, opts.Version)
-	url := fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), s.token)
+	s := newServer(ctx, eng, opts)
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
-	fmt.Fprintf(opts.Out, "Herakles GUI running at %s\nPress Ctrl+C to quit.\n", url)
-	if opts.OpenBrowser {
-		if err := openWindow(url); err != nil {
-			fmt.Fprintf(opts.Out, "could not open a browser window (%v); open the URL above manually\n", err)
-		}
-	}
-	<-ctx.Done()
-	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return srv.Shutdown(sctx)
+	return &Instance{URL: fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), s.token), srv: srv}, nil
 }
 
-// openWindow prefers a chromeless Chromium/Edge "app" window and falls back
+// OpenWindow prefers a chromeless Chromium/Edge "app" window and falls back
 // to the default browser.
-func openWindow(url string) error {
+func OpenWindow(url string) error {
 	var candidates []string
 	switch runtime.GOOS {
 	case "windows":
@@ -253,10 +289,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 		if !ok {
 			if strings.HasPrefix(r.URL.Path, "/api/") {
-				writeJSON(w, 401, apiError{Error: "session expired — restart 'herakles gui'"})
+				writeJSON(w, 401, apiError{Error: "session expired — reopen Herakles (herakles gui or the tray icon)"})
 				return
 			}
-			http.Error(w, "Open the URL printed by 'herakles gui' (it contains the session token).", http.StatusUnauthorized)
+			http.Error(w, "Open Herakles from the tray icon or with the URL printed by 'herakles gui' (it contains the session token).", http.StatusUnauthorized)
 			return
 		}
 		if r.Method != http.MethodGet && r.Header.Get("X-Herakles") != "1" {
