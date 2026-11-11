@@ -88,7 +88,12 @@ func TestIncrementalAndDedup(t *testing.T) {
 	if s2.Summary.FilesUnmodified != s2.Summary.TotalFiles-0 || s2.Summary.BlobsAdded != 0 {
 		t.Fatalf("unchanged incremental: %+v", s2.Summary)
 	}
-	if s2.Tree != s1.Tree {
+	// Compare the source directory's own subtree: the root tree also holds
+	// metadata of parent directories such as /tmp, which other tests running
+	// in parallel may modify between the two backups.
+	n1, err1 := repo.FindNode(ctx, s1.Tree, src)
+	n2, err2 := repo.FindNode(ctx, s2.Tree, src)
+	if err1 != nil || err2 != nil || *n1.Subtree != *n2.Subtree {
 		t.Fatal("identical data produced a different tree")
 	}
 
