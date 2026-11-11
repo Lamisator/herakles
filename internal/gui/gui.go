@@ -144,13 +144,14 @@ func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, er
 	}
 	if opts.Web != nil {
 		// Network mode: logins protect it; no fallback port.
-		s, err := newServer(ctx, eng, opts)
-		if err != nil {
-			return nil, err
-		}
 		ln, err := net.Listen("tcp", opts.Listen)
 		if err != nil {
 			return nil, fmt.Errorf("web interface: %w", err)
+		}
+		s, err := newServer(ctx, eng, opts)
+		if err != nil {
+			ln.Close()
+			return nil, err
 		}
 		srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 		if opts.TLSCert != "" {

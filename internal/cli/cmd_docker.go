@@ -214,7 +214,7 @@ Docker is not touched (to inspect a snapshot or move it elsewhere).`,
 				}
 			}
 			run := ro
-			run.Progress = func(m string) { a.logf("%s\n", m) }
+			run.Progress = func(m string) { a.logf("%s", m) }
 			res, err := a.eng.RestoreProject(cmd.Context(), unit, run)
 			if res != nil {
 				for _, w := range res.Warnings {

@@ -248,12 +248,25 @@ func (a *App) runDaemon(ctx context.Context) error {
 		if err := d.Listen(); err != nil {
 			return err
 		}
-		inst, err := gui.Start(ctx, a.eng, a.webOptions(d))
-		if err != nil {
-			return err
-		}
-		defer inst.Shutdown()
-		a.eng.Log.Info("web interface started", "listen", a.cfg.Web.Listen, "url", a.cfg.Web.URL)
+		// The listen address may not exist yet at boot (e.g. a Docker
+		// bridge address), so keep trying instead of failing the daemon.
+		go func() {
+			for delay := 5 * time.Second; ; delay = min(2*delay, 2*time.Minute) {
+				inst, err := gui.Start(ctx, a.eng, a.webOptions(d))
+				if err == nil {
+					a.eng.Log.Info("web interface started", "listen", a.cfg.Web.Listen, "url", a.cfg.Web.URL)
+					<-ctx.Done()
+					_ = inst.Shutdown()
+					return
+				}
+				a.eng.Log.Error("web interface not started; retrying", "err", err, "in", delay)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+				}
+			}
+		}()
 	}
 	return d.Run(ctx)
 }
