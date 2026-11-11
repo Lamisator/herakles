@@ -63,6 +63,7 @@ type DockerInfo struct {
 	Project     string            `json:"project"`
 	Standalone  bool              `json:"standalone,omitempty"`
 	WorkingDir  string            `json:"working_dir,omitempty"`
+	Home        string            `json:"home,omitempty"` // project directory incl. neighbouring bind mounts
 	ConfigFiles []string          `json:"config_files,omitempty"`
 	Volumes     map[string]string `json:"volumes,omitempty"` // volume name -> host directory
 	Binds       []string          `json:"binds,omitempty"`   // bind mounts outside the project directory

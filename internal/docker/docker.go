@@ -475,6 +475,9 @@ type DataOptions struct {
 	SkipBindMounts bool
 	// Lstat is used to skip missing paths and sockets (tests replace it).
 	Lstat func(string) (os.FileInfo, error)
+	// Roots are the configured folders and scan directories; a project's
+	// home never grows to one of them.
+	Roots []string
 	// Others are the directories of the other projects: a bind mount that
 	// contains one (e.g. a deploy tool mounting /srv/docker) is not part of
 	// this project's data, or restoring the project would replace theirs.
@@ -507,6 +510,54 @@ type DataSet struct {
 	Binds []string `json:"binds,omitempty"`
 	// Shared are bind mounts left out because they contain other projects.
 	Shared []string `json:"shared,omitempty"`
+	// Home is the project's own directory: the compose directory, grown to
+	// the closest common parent of its bind mounts (e.g. Bitwarden's bwdata
+	// for bwdata/docker), so files next to them (configuration, env files)
+	// belong to the project too.
+	Home string `json:"home,omitempty"`
+}
+
+// commonParent returns the deepest directory containing a and b.
+func commonParent(a, b string) string {
+	as := strings.Split(filepath.Clean(a), string(filepath.Separator))
+	bs := strings.Split(filepath.Clean(b), string(filepath.Separator))
+	n := 0
+	for n < len(as) && n < len(bs) && as[n] == bs[n] {
+		n++
+	}
+	c := strings.Join(as[:n], string(filepath.Separator))
+	if c == "" {
+		return string(filepath.Separator)
+	}
+	return c
+}
+
+// home grows the project directory towards its bind mounts while that
+// stays a directory of its own.
+func (o DataOptions) home(wd string, binds []string) string {
+	valid := func(c string) bool {
+		if c == "/" || systemPath(c) || strings.Count(c, string(filepath.Separator)) < 2 || containsAny(c, o.Others) {
+			return false
+		}
+		if len(o.Roots) == 0 {
+			// Without configured folders only the compose directory's
+			// parent qualifies (the usual "../data" layout).
+			return c == filepath.Dir(filepath.Clean(wd))
+		}
+		for _, r := range o.Roots {
+			if r = filepath.Clean(r); c != r && within(c, r) {
+				return true
+			}
+		}
+		return false
+	}
+	h := filepath.Clean(wd)
+	for _, b := range binds {
+		if c := commonParent(h, b); c != h && within(h, c) && valid(c) {
+			h = c
+		}
+	}
+	return h
 }
 
 // containsAny reports whether dir is or contains one of dirs.
@@ -535,7 +586,18 @@ func (p Project) Data(o DataOptions) DataSet {
 	ds := DataSet{Volumes: map[string]string{}}
 	var paths []string
 	if p.WorkingDir != "" && usable(p.WorkingDir) {
-		paths = append(paths, filepath.Clean(p.WorkingDir))
+		var near []string
+		if !o.SkipBindMounts {
+			for _, ct := range p.Containers {
+				for _, m := range ct.Mounts {
+					if m.Type == "bind" && usable(m.Source) && !containsAny(filepath.Clean(m.Source), o.Others) {
+						near = append(near, filepath.Clean(m.Source))
+					}
+				}
+			}
+		}
+		ds.Home = o.home(p.WorkingDir, near)
+		paths = append(paths, ds.Home)
 	}
 	for _, ct := range p.Containers {
 		for _, m := range ct.Mounts {
@@ -555,7 +617,7 @@ func (p Project) Data(o DataOptions) DataSet {
 					ds.Shared = append(ds.Shared, src)
 					continue
 				}
-				if p.WorkingDir == "" || !within(src, filepath.Clean(p.WorkingDir)) {
+				if ds.Home == "" || !within(src, ds.Home) {
 					ds.Binds = append(ds.Binds, src)
 				}
 				paths = append(paths, src)

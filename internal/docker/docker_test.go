@@ -249,3 +249,36 @@ func TestScanSkipsDirsInsideProjects(t *testing.T) {
 		t.Fatal("a directory inside a project became a project:", names)
 	}
 }
+
+func TestProjectHomeGrowsToBindMounts(t *testing.T) {
+	dir := t.TempDir()
+	bw := filepath.Join(dir, "srv", "docker", "bitwarden", "bwdata")
+	for _, d := range []string{"docker", "core", "mssql/data", "env", "logs/api"} {
+		os.MkdirAll(filepath.Join(bw, d), 0o755)
+	}
+	os.WriteFile(filepath.Join(bw, "config.yml"), []byte("x"), 0o600)
+	other := filepath.Join(dir, "srv", "docker", "wiki")
+	os.MkdirAll(other, 0o755)
+	mk := func(src string) docker.Mount { return docker.Mount{Type: "bind", Source: src, Destination: "/x"} }
+	bitwarden := docker.Project{Name: "docker", WorkingDir: filepath.Join(bw, "docker"), Containers: []docker.Container{
+		{Name: "mssql", Mounts: []docker.Mount{mk(filepath.Join(bw, "mssql", "data")), mk(filepath.Join(bw, "core"))}},
+		{Name: "api", Mounts: []docker.Mount{mk(filepath.Join(bw, "logs", "api"))}},
+	}}
+	wiki := docker.Project{Name: "wiki", WorkingDir: other, Containers: []docker.Container{{Name: "w", Mounts: []docker.Mount{mk(filepath.Join(bw, "core"))}}}}
+	sets := docker.DataSets([]docker.Project{bitwarden, wiki}, docker.DataOptions{Roots: []string{filepath.Join(dir, "srv")}})
+	if ds := sets["docker"]; ds.Home != bw || len(ds.Paths) != 1 || ds.Paths[0] != bw {
+		t.Fatalf("bitwarden: home %s, paths %v (config.yml and env/ must be included)", ds.Home, ds.Paths)
+	}
+	// wiki's bind into bwdata would make its home /srv/docker, which holds
+	// other projects: it stays in its own directory.
+	if ds := sets["wiki"]; ds.Home != other {
+		t.Fatalf("wiki home %s", ds.Home)
+	}
+	// Never grow to a configured folder.
+	solo := docker.Project{Name: "app", WorkingDir: filepath.Join(dir, "srv", "app"), Containers: []docker.Container{{Name: "a", Mounts: []docker.Mount{mk(filepath.Join(dir, "srv", "app-data"))}}}}
+	os.MkdirAll(filepath.Join(dir, "srv", "app"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "srv", "app-data"), 0o755)
+	if ds := docker.DataSets([]docker.Project{solo}, docker.DataOptions{Roots: []string{filepath.Join(dir, "srv")}})["app"]; ds.Home != filepath.Join(dir, "srv", "app") || len(ds.Paths) != 2 {
+		t.Fatalf("solo: %+v", ds)
+	}
+}

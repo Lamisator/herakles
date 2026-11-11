@@ -59,7 +59,8 @@ func DockerDataOptions(job *config.Job) docker.DataOptions {
 	if job.Docker == nil {
 		return docker.DataOptions{}
 	}
-	return docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}
+	return docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts,
+		Roots: append(append([]string{}, job.Docker.Folders...), job.Docker.ScanDirs...)}
 }
 
 // dockerProjects returns all projects found for the job and the selected ones.
@@ -234,7 +235,7 @@ func (e *Engine) backupProject(ctx context.Context, repo *repository.Repository,
 	for _, sh := range ds.Shared {
 		log.Info("bind mount contains other projects; they are backed up on their own", "path", sh)
 	}
-	info := &repository.DockerInfo{Project: p.Name, Standalone: p.Standalone, WorkingDir: p.WorkingDir,
+	info := &repository.DockerInfo{Project: p.Name, Standalone: p.Standalone, WorkingDir: p.WorkingDir, Home: ds.Home,
 		ConfigFiles: p.ConfigFiles, Volumes: ds.Volumes, Binds: ds.Binds}
 	var running []string
 	for _, ct := range p.Containers {

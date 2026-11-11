@@ -203,11 +203,12 @@ func (e *Engine) RestoreProject(ctx context.Context, unitName string, o ProjectR
 	}
 	// The project directory goes first: Compose needs it to recreate
 	// missing containers and volumes before their data is restored.
+	hasWD := func(root string) bool { return info.WorkingDir != "" && within(info.WorkingDir, root) }
 	slices.SortStableFunc(roots, func(a, b string) int {
 		switch {
-		case a == info.WorkingDir:
+		case hasWD(a) && !hasWD(b):
 			return -1
-		case b == info.WorkingDir:
+		case hasWD(b) && !hasWD(a):
 			return 1
 		}
 		return 0
@@ -288,7 +289,7 @@ func (e *Engine) RestoreProject(ctx context.Context, unitName string, o ProjectR
 		if err != nil {
 			return res, rollback(fmt.Errorf("restore %s: %w", root, err))
 		}
-		if root == info.WorkingDir && !existed && !info.Standalone {
+		if hasWD(root) && !existed && !info.Standalone {
 			say("creating containers and volumes of %s", info.Project)
 			if err := dc.Create(ctx, projectOf(info)); err != nil {
 				return res, rollback(fmt.Errorf("compose create: %w", err))
