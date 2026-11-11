@@ -49,6 +49,8 @@
       <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div><h3>Files and whole disks</h3><p>Back up folders with permissions and metadata, or image entire disks and partitions and write them back for disaster recovery.</p></div>
       <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="1.5"/><rect x="2" y="14" width="20" height="7" rx="1.5"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div><h3>Store it anywhere</h3><p>Local disk, mounted NFS/CIFS share, Windows UNC path, SMB without mounting, SFTP, or the Herakles repository server.</p></div>
       <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Ransomware‑resistant server</h3><p>The optional backup server has users, per‑user repositories, quotas and an append‑only mode: clients can add backups but never delete them.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="8" width="5" height="4"/><rect x="8" y="8" width="5" height="4"/><rect x="14" y="8" width="5" height="4"/><rect x="8" y="3" width="5" height="4"/><path d="M2 15c4 5 14 5 20-1"/></svg></div><h3>Docker aware</h3><p>Every Docker Compose project is its own backup with its volumes, bind mounts and database dumps, and can be restored on its own, even onto a fresh host.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M17 6l3 3M14 9l2 2"/></svg></div><h3>Web interface with passkeys</h3><p>On a server, sign in from anywhere with a password or a passkey. Accounts with roles, no public sign-up.</p></div>
       <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><h3>Four ways to use it</h3><p>Command line, a full‑screen terminal UI, a desktop GUI and a tray icon, all in the same program and all editing the same YAML file.</p></div>
     </div>
   </div>
@@ -75,13 +77,22 @@
 
     <div class="split rev">
       <div>
+        <h3>Your Docker projects, one by one</h3>
+        <p>Herakles finds every Docker Compose project on the host and backs each one up as its own snapshot: project directory, bind mounts, volumes and consistent dumps of Postgres, MySQL/MariaDB and MongoDB. Restoring a project stops it, puts back its data, starts it and loads the dumps, and rolls back by itself if anything goes wrong.</p>
+        <p><a href="guide.html#docker">How it works →</a></p>
+      </div>
+      <div class="frame"><img src="img/containers.webp" width="1600" height="1000" loading="lazy" alt="Containers page with one card per Docker Compose project"></div>
+    </div>
+
+    <div class="split">
+      <div>
         <h3>Jobs, schedules and retention in one form</h3>
         <p>Pick folders or disks, exclusions, when to run which kind of backup and how long to keep what. Presets cover the common cases. Behind the form is a plain YAML file you can also edit by hand.</p>
       </div>
       <div class="frame"><img src="img/job-editor.webp" width="1600" height="1000" loading="lazy" alt="Job editor with sources, exclusions and schedule sections"></div>
     </div>
 
-    <div class="split">
+    <div class="split rev">
       <div>
         <h3>Quietly in your tray</h3>
         <p><code>herakles tray</code> runs the scheduler and the interface in the background and puts an icon in the system tray. A coloured dot tells you when a backup runs, when a repository needs its password or when something failed. One setting starts it every time you log in.</p>
@@ -92,7 +103,7 @@
       </div>
     </div>
 
-    <div class="split rev">
+    <div class="split">
       <div>
         <h3>A command line that scripts well</h3>
         <p>Everything the interfaces do is also a command: with <code>--help</code> and examples on every command, <code>--json</code> output and meaningful exit codes. Ideal for servers, cron and automation.</p>

@@ -1,5 +1,8 @@
 # Herakles on k-inf1: backups of the Docker services to the Hetzner Storage Box.
-# Managed by Claude; see https://herakles.kloeck-it.de/guide.html
+# Every Docker Compose project is its own snapshot "docker/<project>" (project
+# directory, bind mounts, volumes, database dumps); restore one with
+#   herakles docker restore <project>
+# Guide: https://herakles.kloeck-it.de/guide.html
 state_dir: /var/lib/herakles
 
 repositories:
@@ -18,15 +21,15 @@ repositories:
 
 jobs:
   - name: docker
-    description: Docker services (/srv), named volumes, Traefik/Let's Encrypt config
+    description: Docker Compose projects (one snapshot each) and host data outside them
     repository: storagebox
-    paths:
-      - /srv
-      - /var/lib/docker/volumes
-      - /etc/traefik
-      - /etc/letsencrypt
+    docker:
+      scan_dirs: [/srv/docker]               # also projects without running containers
+    paths:                                   # host data that belongs to no project
+      - /srv/docker-archive
+      - /srv/dudle
     exclude:
-      - /srv/traefik/logs                # constantly growing access log
+      - /srv/traefik/logs                    # constantly growing access log
     exclude_caches: true
     one_file_system: true
     full_interval: 7d
@@ -41,9 +44,6 @@ jobs:
       keep_monthly: 12
       keep_yearly: 2
       keep_full: 2
-    hooks:
-      before: [/etc/herakles/dump-databases.sh]   # Postgres/MongoDB dumps -> /srv/backup-dumps
-      timeout: 30m
     retry:
       attempts: 2
       delay: 20m
@@ -52,3 +52,9 @@ jobs:
 daemon:
   max_concurrent_jobs: 1
   log_file: /var/log/herakles.log
+
+# Web interface with accounts (passwords, passkeys) behind Traefik:
+# /etc/traefik/dynamic/herakles-backup.yml routes backup.kloeck-it.de here.
+web:
+  listen: 192.168.32.1:7480                  # gateway of the Docker network "proxy"
+  url: https://backup.kloeck-it.de

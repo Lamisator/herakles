@@ -42,6 +42,10 @@
     <li><a href="#disks">Disks and partitions</a></li>
     <li><a href="#server">Repository server</a>
       <ol><li><a href="#server-setup">Setting it up</a></li><li><a href="#server-clients">Connecting clients</a></li><li><a href="#nas">On a NAS (QNAP, Synology)</a></li><li><a href="#server-vs-share">Server or network share?</a></li></ol></li>
+    <li><a href="#docker">Docker Compose projects</a>
+      <ol><li><a href="#docker-setup">Setting it up</a></li><li><a href="#docker-what">What is backed up</a></li><li><a href="#docker-restore">Restoring a project</a></li></ol></li>
+    <li><a href="#web">Web interface &amp; accounts</a>
+      <ol><li><a href="#web-setup">Setting it up</a></li><li><a href="#web-accounts">Accounts and passkeys</a></li><li><a href="#web-proxy">Behind a reverse proxy</a></li></ol></li>
     <li><a href="#replication">Copies and the 3‑2‑1 rule</a></li>
     <li><a href="#hooks">Hooks and notifications</a></li>
     <li><a href="#maintenance">Maintenance</a></li>
@@ -461,6 +465,108 @@ services:
   <li>you want one place that hosts the repositories of many computers.</li>
 </ul>
 
+<h2 id="docker">Docker Compose projects</h2>
+<p>On a Docker host, Herakles can treat every Compose project as its own backup unit. Each project gets its own snapshot named <code>JOB/PROJECT</code>, so you can see, keep and restore <em>wiki</em> or <em>nextcloud</em> independently of everything else, and restore one project without touching the others.</p>
+<figure class="frame"><img src="img/containers.webp" width="1600" height="1000" loading="lazy" alt="Containers page with one card per Compose project, its containers, databases and last backup"></figure>
+
+<h3 id="docker-setup">Setting it up</h3>
+<p>Add a <code>docker</code> section to a job. Herakles finds the projects itself from the labels Docker Compose puts on its containers.</p>
+<pre>jobs:
+  - name: containers
+    repository: nas
+    docker:
+      scan_dirs: [/srv/docker]        <span class="c"># also projects whose containers don't exist right now</span>
+      exclude_projects: [portainer]   <span class="c"># globs; projects: [...] selects instead</span>
+      <span class="c"># stop: [zammad]                # stop these during their backup instead of dumping</span>
+      <span class="c"># skip_dumps / skip_volumes / skip_bind_mounts / skip_standalone: true</span>
+    paths: [/srv/other-data]          <span class="c"># optional: host data outside the projects</span>
+    exclude: [/srv/traefik/logs]      <span class="c"># works for bind mounts too</span>
+    schedule: [{ cron: "15 3 * * *", type: auto }]
+    full_interval: 7d
+    retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 6 }</pre>
+<p>Retention applies to each project separately. Run the job as root (the system service), since project data usually belongs to root or container users.</p>
+<pre>herakles docker ls --last            <span class="c"># projects, containers, databases, data paths, last backup</span>
+herakles docker show wiki            <span class="c"># exactly what is backed up for one project</span>
+herakles docker backup wiki          <span class="c"># one project now (or: herakles backup containers/wiki)</span>
+herakles backup containers           <span class="c"># all projects</span>
+herakles snapshots --job containers/wiki</pre>
+<p><code>docker ls</code> also lists volumes that belong to no project: those are not in any project backup. Add them to the job's <code>paths</code> if you need them.</p>
+
+<h3 id="docker-what">What is backed up</h3>
+<table>
+<tr><th>Part</th><th>Details</th></tr>
+<tr><td>Project directory</td><td>The folder with the compose file, <code>.env</code> and everything inside it.</td></tr>
+<tr><td>Bind mounts</td><td>Host folders and files mounted into the containers, also outside the project directory. System paths (<code>/proc</code>, <code>/run</code>, the Docker socket, <code>/etc/localtime</code>, …) are skipped.</td></tr>
+<tr><td>Named volumes</td><td>Volumes mounted by the containers, plus volumes Compose created for the project (so stopped projects keep theirs).</td></tr>
+<tr><td>Database dumps</td><td>For Postgres (<code>pg_dumpall</code>), MySQL/MariaDB (<code>mysqldump</code>/<code>mariadb-dump</code> with the root password from the container's environment) and MongoDB (<code>mongodump</code>), taken while the project runs. Credentials stay inside the container. Database containers without a running server (such as backup sidecars) are skipped.</td></tr>
+<tr><td>Metadata</td><td><code>docker inspect</code> output of all containers and which data belongs where, for restores and for re-creating standalone containers.</td></tr>
+</table>
+<p>Databases are covered twice: by their raw files and by a dump. Raw files of a running database are not guaranteed to be consistent; the dump always is. For complete consistency of everything, put a project in <code>stop:</code>: it is stopped for the few seconds its backup takes and started again afterwards.</p>
+
+<h3 id="docker-restore">Restoring a project</h3>
+<p>In the GUI, open <strong>Containers</strong>, click <strong>Restore…</strong> on the project, choose a snapshot and confirm by typing the project name. On the command line:</p>
+<pre>herakles docker restore wiki                       <span class="c"># latest snapshot, asks for confirmation</span>
+herakles docker restore wiki --snapshot 3fa2b1c9 --yes
+herakles docker restore wiki --databases files     <span class="c"># raw database files instead of dumps</span>
+herakles docker restore wiki --keep-old            <span class="c"># keep the replaced data as PATH.herakles-old-TIME</span>
+herakles docker restore wiki --dry-run             <span class="c"># show what would happen</span>
+herakles docker restore wiki --target /tmp/wiki    <span class="c"># only extract the files; Docker is not touched</span></pre>
+<p>A restore runs these steps:</p>
+<ol>
+  <li>Stop the project.</li>
+  <li>Move its current data aside (project directory, bind mounts, volumes).</li>
+  <li>Restore the data from the snapshot. If the containers don't exist (a fresh host), create them and their volumes with <code>docker compose up --no-start</code> first.</li>
+  <li>Start the project.</li>
+  <li>In <strong>dumps</strong> mode: the database directories start empty, so the database images initialise fresh databases; Herakles waits until they are ready and loads the dumps.</li>
+  <li>Remove the moved-aside data (unless <code>--keep-old</code>).</li>
+</ol>
+<p>If anything fails before the project runs again, the previous data is put back and the project restarted. The default database mode is <strong>dumps</strong> for snapshots taken while running and <strong>files</strong> for snapshots taken with the project stopped. Restores are tested against real Postgres 16, MariaDB 11 and MongoDB 7 containers, including restoring onto a host where the containers, volumes and project directory had been deleted.</p>
+<div class="note"><p>A restore takes an exclusive lock on the repository, so no scheduled backup reads half-restored data. Standalone containers (not created by Compose) are restarted if they still exist; if not, re-create them from <code>inspect.json</code> in the snapshot's metadata.</p></div>
+
+<h2 id="web">Web interface &amp; accounts</h2>
+<p>On a server, the daemon can serve the desktop interface on the network, protected by accounts. Users sign in with a password or a passkey (Face ID, Touch ID, Windows Hello, a phone, a password manager or a security key).</p>
+<figure class="tray-pair"><div class="frame"><img src="img/login.webp" loading="lazy" alt="Sign-in page with password and passkey"></div><div class="frame"><img src="img/account.webp" loading="lazy" alt="Account page with a registered passkey"></div></figure>
+
+<h3 id="web-setup">Setting it up</h3>
+<pre>web:
+  listen: 127.0.0.1:7480              <span class="c"># address the daemon listens on</span>
+  url: https://backup.example.com     <span class="c"># public address; passkeys are bound to this host name</span>
+  <span class="c"># tls_cert: /etc/herakles/web.crt   # serve HTTPS directly instead of behind a proxy</span>
+  <span class="c"># tls_key: /etc/herakles/web.key</span>
+  <span class="c"># session_hours: 12</span></pre>
+<p>Restart the service (<code>herakles daemon restart</code>). There is <strong>no public sign-up</strong>. While no account exists, the daemon writes a one-time setup link to its log; print it with:</p>
+<pre>sudo herakles web setup-link
+<span class="c"># https://backup.example.com/login.html#setup=…</span></pre>
+<p>Open it to create the first administrator. Alternatively create one on the server: <code>sudo herakles web add marius --admin</code>.</p>
+
+<h3 id="web-accounts">Accounts and passkeys</h3>
+<table>
+<tr><th>Role</th><th>Can</th></tr>
+<tr><td>admin</td><td>Everything: configuration, repositories, jobs, users, deleting snapshots.</td></tr>
+<tr><td>user</td><td>Dashboard, run backups, browse, download and restore (files and Docker projects). Sees the configuration without passwords; cannot change it.</td></tr>
+</table>
+<ul>
+  <li>Administrators create users under <strong>Users</strong> with an initial password, can change roles, reset passwords, remove passkeys and disable accounts.</li>
+  <li>Everyone manages their own passkeys and password under <strong>Account</strong>. A passkey-only account is possible once a passkey exists.</li>
+  <li>From the server shell: <code>herakles web users</code>, <code>web add NAME [--admin]</code>, <code>web passwd NAME</code> (also re-enables an account), <code>web remove NAME</code>.</li>
+  <li>Passwords are stored as Argon2id hashes in <code>&lt;state_dir&gt;/web/accounts.json</code> (mode 0600). After five failed logins per address and name, further attempts are refused for a growing time. Changing a password or disabling an account ends its other sessions.</li>
+</ul>
+
+<h3 id="web-proxy">Behind a reverse proxy</h3>
+<p>Let the proxy terminate TLS and forward to the <code>listen</code> address. The interface only answers to the host name of <code>url</code>, requires a custom header for every change (CSRF protection), and sends HSTS, frame and content-security headers. Example for Traefik with a file provider, when Herakles runs on the host and Traefik in Docker (listen on the gateway address of Traefik's Docker network and allow that port from the network in the host firewall):</p>
+<pre>http:
+  routers:
+    herakles:
+      rule: "Host(`backup.example.com`)"
+      entryPoints: [websecure]
+      service: herakles
+      tls: { certResolver: le }
+  services:
+    herakles:
+      loadBalancer:
+        servers: [{ url: "http://192.168.32.1:7480" }]</pre>
+<p>If the listen address does not exist yet when the service starts (a Docker bridge at boot), the daemon keeps retrying in the background.</p>
+
 <h2 id="replication">Copies and the 3‑2‑1 rule</h2>
 <p>Keep 3 copies of your data, on 2 different media, 1 of them off-site. With Herakles, back up to a local repository and copy the snapshots to a second one:</p>
 <pre>herakles copy --from usb-disk --to offsite                  <span class="c"># all snapshots not yet there</span>
@@ -518,7 +624,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
 <h3>Command line</h3>
 <pre>herakles init | backup | jobs | snapshots | ls | find | diff | restore | restore-device | dump
          forget | prune | check | stats | copy | key | unlock | repair index
-         config | daemon | server | tui | gui | tray | version</pre>
+         docker | web | config | daemon | server | tui | gui | tray | version</pre>
 <p>Global options: <code>-c/--config</code>, <code>-r/--repo</code> (a repository name or a location), <code>--password-file</code>, <code>--key-file</code>, <code>--no-prompt</code>, <code>--json</code> (machine-readable output), <code>-q</code>, <code>-v</code>. Exit codes: <code>0</code> success, <code>1</code> error, <code>3</code> backup finished but some files could not be read. Shell completion: <code>herakles completion bash|zsh|fish|powershell</code>.</p>
 <h3>Terminal UI: <code>herakles tui</code></h3>
 <p>A full-screen interface for terminals and SSH sessions, with five tabs (keys <kbd>1</kbd>–<kbd>5</kbd> or <kbd>F1</kbd>–<kbd>F5</kbd>):</p>
@@ -533,6 +639,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
 <p>The interface runs inside Herakles and is only reachable from your own computer (<code>127.0.0.1</code>), protected by a random session token. It opens in a Chromium or Edge app window if one is installed, otherwise in your default browser. <code>--no-browser</code> just prints the address; <code>--listen</code> changes the port (default <code>127.0.0.1:7478</code>).</p>
 <ul>
   <li><strong>Dashboard</strong>: jobs with <em>Back up now</em>, <em>Full</em>, <em>Incremental</em>, <em>Differential</em>, live progress, daemon state and next run.</li>
+  <li><strong>Containers</strong>: Docker Compose projects with containers, databases, last backup, and per-project backup and restore.</li>
   <li><strong>Snapshots &amp; Restore</strong>: browse, restore, download, compare, forget.</li>
   <li><strong>Backup Jobs</strong>: the complete job editor with schedule presets, retention, hooks and retries.</li>
   <li><strong>Repositories</strong>: add and edit all storage types, unlock settings, bandwidth limits, maintenance schedules; initialize, check, prune and statistics.</li>
@@ -654,10 +761,24 @@ jobs:
     retention:
       keep_monthly: 6
 
+  - name: containers            # Docker: one snapshot per Compose project
+    repository: local
+    docker:
+      exclude_projects: [portainer]
+      scan_dirs: [/srv/docker]
+      # stop: [zammad]
+    schedule:
+      - cron: "15 3 * * *"
+        type: auto
+
 daemon:
   control_listen: 127.0.0.1:7477
   max_concurrent_jobs: 1
   # log_file: /var/log/herakles.log
+
+# web:                         # web interface with accounts (served by the daemon)
+#   listen: 127.0.0.1:7480
+#   url: https://backup.example.com
 
 gui:
   listen: 127.0.0.1:7478

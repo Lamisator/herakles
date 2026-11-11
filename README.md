@@ -9,6 +9,8 @@ It ships as a single static binary for Linux and Windows. That one binary contai
 * a graphical desktop UI (`herakles gui`),
 * a tray icon that runs the daemon and the GUI on your desktop (`herakles tray`),
 * a background daemon/service for scheduled backups (`herakles daemon`),
+* Docker Compose awareness: every project backed up and restored on its own (`herakles docker`),
+* a web interface with accounts and passkeys for servers (`web:` in the configuration),
 * the repository server (`herakles server`).
 
 Everything is configured in one YAML file. You can edit it by hand, from the CLI, in the TUI or in the GUI.
@@ -29,6 +31,8 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** and has a token‑protected local control API. |
 | **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index from pack headers. Restores can be verified. Interrupted backups resume (indexes are written periodically). |
 | **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and download from the GUI. |
+| **Docker** | A `docker:` section makes a job back up every Compose project (and standalone container) as its own snapshot `JOB/PROJECT`: project directory, bind mounts, named volumes (also of stopped projects) and dumps of Postgres, MySQL/MariaDB and MongoDB. Projects can be stopped during their backup instead. `herakles docker restore` stops the project, restores everything, starts it and loads the dumps into fresh databases, with automatic rollback. |
+| **Web interface** | The daemon can serve the GUI on the network: accounts with Argon2id passwords and passkeys, roles (admin, user), no public sign-up (one-time setup link for the first administrator). |
 | **Extras** | Pre/post/success/failure hooks, notifications (webhook, e‑mail, command), `copy` of snapshots between repositories (3‑2‑1 replication), JSON output for scripting, run history. |
 
 ---
@@ -222,6 +226,47 @@ The daemon needs a non‑interactive password source for each repository.
 
 ---
 
+## Docker Compose projects
+
+```yaml
+jobs:
+  - name: containers
+    repository: nas
+    docker:
+      scan_dirs: [/srv/docker]       # also projects without containers
+      exclude_projects: [portainer]
+      # stop: [zammad]               # stop during backup instead of dumping
+    paths: [/srv/other]              # host data outside the projects (optional)
+    schedule: [{ cron: "15 3 * * *", type: auto }]
+    full_interval: 7d
+    retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 6 }
+```
+
+Projects are discovered from the Compose container labels. Each project gets its own snapshot `containers/<project>` holding the project directory, bind mounts outside it, its named volumes (by mount and by Compose label, so stopped projects keep theirs), `docker inspect` output and logical dumps of its Postgres, MySQL/MariaDB and MongoDB containers (taken while running; database containers without a server, such as backup sidecars, are skipped). Retention and history work per project.
+
+```sh
+herakles docker ls [--last]          # projects, databases, data paths, last backup, orphan volumes
+herakles docker show wiki            # exactly what is backed up for one project
+herakles docker backup wiki          # or: herakles backup containers/wiki
+herakles docker restore wiki         # stop, restore, start, load dumps (asks for confirmation)
+herakles docker restore wiki --snapshot 3fa2b1c9 --databases files --keep-old
+herakles docker restore wiki --target /tmp/wiki   # just the files, Docker untouched
+```
+
+A restore moves the current data aside, restores directory, bind mounts and volumes, recreates missing containers and volumes with `docker compose up --no-start` (so a project can be restored onto a fresh host), starts the project and, in **dumps** mode (default for snapshots taken while running), loads the dumps into freshly initialised database directories. **files** mode (default for snapshots taken with the project stopped) restores the raw database files. If anything fails before the project runs again, the previous data is put back.
+
+## Web interface with accounts
+
+```yaml
+web:
+  listen: 127.0.0.1:7480             # behind a TLS reverse proxy
+  url: https://backup.example.com    # public address; passkeys are bound to its host
+```
+
+The daemon then serves the GUI on the network. Sign-in is by password (Argon2id) or passkey (WebAuthn, discoverable). There is **no public sign-up**: while no account exists, the daemon logs a one-time setup link (`herakles web setup-link` prints it) for creating the first administrator; administrators create further users in the GUI (**Users**) or with `herakles web add NAME [--admin]`. Users can run backups, browse and restore; only administrators change configuration, repositories and users or see secrets. Failed logins are throttled; sessions end on sign-out, password change or when an account is disabled. Accounts live in `<state_dir>/web/accounts.json` (mode 0600).
+
+---
+
 ## Client/server mode
 
 ```sh
@@ -292,6 +337,8 @@ The suite covers:
 * backup/restore round trips, incremental detection, excludes and device images;
 * retention, configuration, the job engine (hooks, notifications, copy), the server (auth, ACL, append‑only, quota) and the daemon (scheduler, retries, catch‑up, control API);
 * CLI end‑to‑end workflows, the TUI (simulated terminal) and the GUI API.
+* Docker: discovery, data sets, database detection, dumps and loads against a fake docker CLI; per-project backup, restore in dumps and files mode, rollback, fresh-host restore; plus a manual integration run against real Postgres, MariaDB and MongoDB containers.
+* Web mode: setup link, password and passkey logins, throttling, roles, secret redaction, Host/CSRF checks; a Playwright run with a virtual authenticator.
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 
 ## Current limitations

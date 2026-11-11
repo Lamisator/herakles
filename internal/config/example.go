@@ -111,6 +111,31 @@ jobs:
     retention:
       keep_monthly: 6
 
+  # Docker: every Compose project (and standalone container) becomes its own
+  # snapshot "containers/<project>" with its directory, bind mounts, named
+  # volumes and dumps of Postgres, MySQL/MariaDB and MongoDB containers.
+  # Restore one with: herakles docker restore <project>
+  - name: containers
+    repository: local
+    docker:
+      # projects: ["*"]            # globs; default all
+      exclude_projects: [portainer]
+      scan_dirs: [/srv/docker]     # also projects whose containers do not exist
+      # stop: [zammad]             # stop these during their backup instead of dumping
+      # skip_dumps: false
+      # skip_volumes: false
+      # skip_bind_mounts: false
+      # skip_standalone: false     # containers that are not part of a Compose project
+    paths: [/srv/other-data]       # host data outside the projects (optional)
+    schedule:
+      - cron: "15 3 * * *"
+        type: auto
+    full_interval: 7d
+    retention:
+      keep_daily: 7
+      keep_weekly: 4
+      keep_monthly: 6
+
 daemon:
   control_listen: 127.0.0.1:7477
   max_concurrent_jobs: 1
@@ -119,6 +144,16 @@ daemon:
 gui:
   listen: 127.0.0.1:7478
   open_browser: true
+
+# Web interface with accounts (passwords and passkeys), served by the daemon.
+# There is no public sign-up: the first administrator is created with a
+# one-time link from the daemon log ('herakles web setup-link').
+# web:
+#   listen: 127.0.0.1:7480             # put a TLS reverse proxy in front
+#   url: https://backup.example.com    # public address; passkeys bind to it
+#   # tls_cert: /etc/herakles/web.crt  # or serve HTTPS directly
+#   # tls_key: /etc/herakles/web.key
+#   # session_hours: 12
 
 tray:
   # Start 'herakles tray' (scheduled backups, GUI and a tray icon) when you

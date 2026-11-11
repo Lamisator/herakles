@@ -13,8 +13,11 @@ func TestExampleParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Repositories) != 2 || len(c.Jobs) != 2 {
+	if len(c.Repositories) != 2 || len(c.Jobs) != 3 {
 		t.Fatalf("parsed %d repos %d jobs", len(c.Repositories), len(c.Jobs))
+	}
+	if d := c.Job("containers").Docker; d == nil || !d.Selects("wiki") || d.Selects("portainer") || len(d.ScanDirs) != 1 {
+		t.Fatalf("docker job: %+v", d)
 	}
 	j := c.Job("home")
 	if j.Retention.KeepMonthly != 12 || j.Retention.KeepWithin.Days != 2 || len(j.Schedules) != 3 {
