@@ -11,6 +11,7 @@ import (
 
 	"github.com/lamisator/herakles/internal/blockdev"
 	"github.com/lamisator/herakles/internal/docker"
+	"github.com/lamisator/herakles/internal/wizard"
 )
 
 var safeRepoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -72,17 +73,8 @@ func (s *Server) wizardRoutes(mux *http.ServeMux) {
 			s.fail(w, errors.New("use a password with at least 8 characters"), "")
 			return
 		}
-		dir := filepath.Dir(s.eng.Config().Path())
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			s.fail(w, err, "")
-			return
-		}
-		p := filepath.Join(dir, name+".password")
-		if _, err := os.Stat(p); err == nil {
-			s.fail(w, errors.New(p+" exists already; choose another repository name"), "")
-			return
-		}
-		if err := os.WriteFile(p, []byte(req.Password+"\n"), 0o600); err != nil {
+		p, err := wizard.StorePassword(filepath.Dir(s.eng.Config().Path()), name, req.Password)
+		if err != nil {
 			s.fail(w, err, "")
 			return
 		}

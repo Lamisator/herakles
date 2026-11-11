@@ -290,3 +290,7 @@ button.icon-only .ico { margin: 0; }
 .paths-cell { min-width: 200px; max-width: 360px; }
 div.job-cell { display: flex; }
 .snap-table td, .snap-table th { padding-left: 8px; padding-right: 8px; }
+/* long words (paths, URLs, names) wrap instead of leaving their box */
+.tile, .summary-row > div, .stat > div, .dev-main, .sys-text { min-width: 0; }
+.tile b, .tile .d, .summary-row, .toast, .chip, .modal .body p, .stat .v { overflow-wrap: anywhere; }
+.chip { max-width: 100%; }

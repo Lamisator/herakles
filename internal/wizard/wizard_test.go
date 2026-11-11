@@ -77,7 +77,16 @@ func TestPasswords(t *testing.T) {
 	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
 		t.Fatal(st.Mode())
 	}
-	if _, err := StorePassword(dir, "nas", "other"); err == nil {
+	// A retry with the same password reuses the file.
+	if p2, err := StorePassword(dir, "nas", "secret"); err != nil || p2 != p {
+		t.Fatal(p2, err)
+	}
+	// A different password never overwrites it but goes to the next free name.
+	p3, err := StorePassword(dir, "nas", "other")
+	if err != nil || filepath.Base(p3) != "nas-2.password" {
+		t.Fatal(p3, err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "secret\n" {
 		t.Fatal("overwrote an existing password file")
 	}
 	if _, err := StorePassword(dir, "../x", "s"); err == nil {

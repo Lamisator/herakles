@@ -271,7 +271,9 @@ func (p *Plan) Job(repo string) (*config.Job, error) {
 }
 
 // StorePassword writes a repository password to <dir>/<repo>.password
-// (mode 0600) and returns the path.
+// (mode 0600) and returns the path. An existing file is never overwritten:
+// one with the same password is reused (a retried wizard), otherwise the
+// next free name (<repo>-2.password, …) is taken.
 func StorePassword(dir, repo, password string) (string, error) {
 	if !validName.MatchString(repo) {
 		return "", errors.New("invalid repository name")
@@ -279,9 +281,31 @@ func StorePassword(dir, repo, password string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	p := filepath.Join(dir, repo+".password")
-	if _, err := os.Stat(p); err == nil {
-		return "", fmt.Errorf("%s exists already; choose another repository name", p)
+	want := password + "\n"
+	for i := 1; i < 100; i++ {
+		name := repo
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d", repo, i)
+		}
+		p := filepath.Join(dir, name+".password")
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			_, err = f.WriteString(want)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				os.Remove(p)
+				return "", err
+			}
+			return p, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		if b, err := os.ReadFile(p); err == nil && string(b) == want {
+			return p, nil
+		}
 	}
-	return p, os.WriteFile(p, []byte(password+"\n"), 0o600)
+	return "", fmt.Errorf("too many password files for %s in %s", repo, dir)
 }

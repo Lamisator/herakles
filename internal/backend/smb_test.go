@@ -26,3 +26,21 @@ func TestSMB(t *testing.T) {
 		t.Fatal("wrong SMB password accepted")
 	}
 }
+
+func TestSMBPath(t *testing.T) {
+	for _, c := range []struct{ in, share, root string }{
+		{"/backup/herakles", "backup", "herakles"},
+		{"/backup//herakles/", "backup", "herakles"},
+		{"//backup/", "backup", "."},
+		{"/backup/a//b/./c", "backup", "a/b/c"},
+		{`/backup\herakles`, "backup", "herakles"},
+	} {
+		share, root, err := smbPath(c.in)
+		if err != nil || share != c.share || root != c.root {
+			t.Errorf("%q: %q %q %v", c.in, share, root, err)
+		}
+	}
+	if _, _, err := smbPath("//"); err == nil {
+		t.Error("no share accepted")
+	}
+}

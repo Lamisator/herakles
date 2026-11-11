@@ -1170,14 +1170,18 @@ views.wizard = async main => {
     return job.paths.join(', ') + (job.exclude && job.exclude.length ? ' (leaving out ' + job.exclude.length + ' patterns)' : '');
   }
 
+  // "backup/", "/backup//herakles", "\\nas\backup" → clean segments without doubled slashes.
+  const cleanPath = p => (p || '').trim().split(/[\\/]+/).filter(x => x && x !== '.').join('/');
+  const hostOf = x => (x || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/^[\\/]+|[\\/]+$/g, '');
+
   function repoDraft() {
     const L = wz.loc;
     const base = { local: 'local', smb: 'nas', sftp: 'sftp', server: 'backup-server' }[wz.type];
     const name = wz.repoName || uniqueRepo(base);
     const r = { name, compression: '' };
     if (wz.type === 'local') r.location = L.path.trim();
-    if (wz.type === 'smb') { r.location = 'smb://' + (L.user ? encodeURIComponent(L.user) + '@' : '') + L.host.trim() + '/' + L.share.trim() + (L.dir ? '/' + L.dir.replace(/^\/+/, '') : ''); r.remote = { password: L.pass }; }
-    if (wz.type === 'sftp') { r.location = 'sftp://' + (L.user ? L.user + '@' : '') + L.host.trim() + '/' + L.dir.replace(/^\/+/, ''); if (L.identity) r.remote = { identity_file: L.identity }; }
+    if (wz.type === 'smb') { r.location = 'smb://' + (L.user ? encodeURIComponent(L.user) + '@' : '') + hostOf(L.host) + '/' + cleanPath(L.share) + (cleanPath(L.dir) ? '/' + cleanPath(L.dir) : ''); r.remote = { password: L.pass }; }
+    if (wz.type === 'sftp') { r.location = 'sftp://' + (L.user ? L.user + '@' : '') + hostOf(L.host) + '/' + cleanPath(L.dir); if (L.identity) r.remote = { identity_file: L.identity }; }
     if (wz.type === 'server') { r.location = 'herakles://' + L.url.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '') + '/' + L.srvRepo.trim(); r.remote = { username: L.user, password: L.pass, ca_cert: L.ca }; }
     if (wz.maintenance) r.maintenance = { prune_schedule: '30 4 * * 0', repack_threshold: 0.2, check_schedule: '0 5 1 * *', check_read_data: '5%' };
     return r;
@@ -1241,24 +1245,37 @@ views.wizard = async main => {
     const progress = h('div', { class: 'muted', style: 'margin-top:10px' });
     btn.after(progress);
     const say = m => { progress.textContent = m; };
+    let step = '';
     try {
       const job = buildJob();
       let c = await loadConfig();
       if (wz.repoMode === 'new') {
+        // A retry after an error skips what the previous attempt finished.
+        const done = wz.done = wz.done || {};
         const r = repoDraft();
         const pw = wz.pwMode === 'generate' ? wz.password : wz.pw1;
         if (wz.pwMode !== 'ask') {
-          say('Storing the password…');
+          step = 'Storing the password';
+          say(step + '…');
           const res = await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/password-file', { password: pw });
           r.password_file = res.path;
         }
-        say('Saving the repository…');
-        c.repositories = (c.repositories || []).concat([r]);
+        step = 'Saving the repository';
+        say(step + '…');
+        const others = (c.repositories || []).filter(x => !(done.repo && x.name === done.repo));
+        if (others.some(x => x.name === r.name)) throw new Error('A repository named “' + r.name + '” exists already; go back and choose another name');
+        c.repositories = others.concat([r]);
         c = await api('PUT', '/api/config', c);
-        say('Creating the encrypted repository…');
-        await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/init', { password: pw }, true);
+        done.repo = r.name;
+        if (!done.init) {
+          step = 'Creating the encrypted repository';
+          say(step + '…');
+          await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/init', { password: pw }, true);
+          done.init = true;
+        }
       }
-      say('Saving the job…');
+      step = 'Saving the job';
+      say(step + '…');
       c = await loadConfig();
       c.jobs = (c.jobs || []).concat([job]);
       if (wz.autostart) c.tray = Object.assign({}, c.tray, { autostart: true });
@@ -1272,8 +1289,8 @@ views.wizard = async main => {
           h('button', { onclick: () => navigate('wizard') }, 'Set up another backup'))));
       clear(stepsEl);
     } catch (e) {
-      toast(e.message, true);
-      say('');
+      toast((step ? step + ' failed: ' : '') + e.message, true);
+      say(step ? step + ' failed: ' + e.message + ' — fix it and click “Create backup” again; finished steps are not repeated.' : '');
       btn.disabled = false;
     }
   }

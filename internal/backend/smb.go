@@ -41,13 +41,9 @@ func NewSMB(raw string, opts Options) (Backend, error) {
 	if u.Port() == "" {
 		host = net.JoinHostPort(u.Hostname(), "445")
 	}
-	parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 2)
-	if parts[0] == "" {
-		return nil, fmt.Errorf("smb URL must contain a share name: smb://server/share/path")
-	}
-	root := "."
-	if len(parts) == 2 && parts[1] != "" {
-		root = strings.TrimSuffix(parts[1], "/")
+	share, root, err := smbPath(u.Path)
+	if err != nil {
+		return nil, err
 	}
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
@@ -59,13 +55,33 @@ func NewSMB(raw string, opts Options) (Backend, error) {
 		conn.Close()
 		return nil, fmt.Errorf("smb login: %w", err)
 	}
-	share, err := sess.Mount(parts[0])
+	mnt, err := sess.Mount(share)
 	if err != nil {
 		_ = sess.Logoff()
-		return nil, fmt.Errorf("smb mount %s: %w", parts[0], err)
+		return nil, fmt.Errorf("smb mount %s: %w", share, err)
 	}
-	return newFSBackend(smbFS{share}, root, raw, func() error {
-		_ = share.Umount()
+	return newFSBackend(smbFS{mnt}, root, raw, func() error {
+		_ = mnt.Umount()
 		return sess.Logoff()
 	}, 4), nil
+}
+
+// smbPath splits the URL path into share and folder. Doubled or trailing
+// slashes and backslashes are ignored ("/backup//herakles/" = share
+// "backup", folder "herakles").
+func smbPath(p string) (share, root string, err error) {
+	var parts []string
+	for _, s := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if s != "." {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return "", "", fmt.Errorf("smb URL must contain a share name: smb://server/share/path")
+	}
+	root = "."
+	if len(parts) > 1 {
+		root = strings.Join(parts[1:], "/")
+	}
+	return parts[0], root, nil
 }
