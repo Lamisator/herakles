@@ -223,3 +223,25 @@ func TestScanTreeAndDirs(t *testing.T) {
 		t.Fatal(d)
 	}
 }
+
+func TestScanSkipsDirsInsideProjects(t *testing.T) {
+	dir := t.TempDir()
+	wd := filepath.Join(dir, "srv", "pyxis")
+	os.MkdirAll(filepath.Join(wd, "repo"), 0o755)
+	os.WriteFile(filepath.Join(wd, "repo", "docker-compose.yml"), []byte("services: {}\n"), 0o644) // compose file of a source checkout
+	os.MkdirAll(filepath.Join(dir, "srv", "archive", "old"), 0o755)
+	os.WriteFile(filepath.Join(dir, "srv", "archive", "old", "compose.yml"), []byte("services: {}\n"), 0o644)
+	fake := dockertest.New(t)
+	fake.Set(dockertest.Container{Name: "pyxis-app", Image: "x", Project: "pyxis", WorkingDir: wd, Running: true})
+	ps, err := (&docker.Client{Binary: fake.Bin}).Projects(context.Background(), docker.Search{Trees: []string{filepath.Join(dir, "srv")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, p := range ps {
+		names = append(names, p.Name)
+	}
+	if strings.Join(names, ",") != "old,pyxis" {
+		t.Fatal("a directory inside a project became a project:", names)
+	}
+}

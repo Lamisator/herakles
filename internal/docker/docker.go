@@ -401,7 +401,26 @@ func (c *Client) ProjectsAndVolumes(ctx context.Context, search Search) ([]Proje
 			known["dir:"+filepath.Clean(p.WorkingDir)] = true
 		}
 	}
+	// Directories inside a project that has containers belong to it (e.g. a
+	// source checkout with its own compose file), not to a new project.
+	var owned []string
+	for _, p := range ps {
+		if p.WorkingDir != "" {
+			owned = append(owned, filepath.Clean(p.WorkingDir))
+		}
+	}
+	inside := func(dir string) bool {
+		for _, o := range owned {
+			if dir != o && within(dir, o) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, p := range append(ScanDirs(search.Dirs), ScanTree(search.Trees, 3)...) {
+		if inside(filepath.Clean(p.WorkingDir)) {
+			continue
+		}
 		if !known[p.Name] && !known["dir:"+filepath.Clean(p.WorkingDir)] {
 			ps = append(ps, p)
 			known[p.Name], known["dir:"+filepath.Clean(p.WorkingDir)] = true, true
