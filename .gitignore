@@ -1,0 +1,6 @@
+/herakles
+/herakles.exe
+/dist/
+*.test
+*.out
+coverage.*
