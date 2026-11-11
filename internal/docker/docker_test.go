@@ -176,3 +176,30 @@ func TestProjectName(t *testing.T) {
 		}
 	}
 }
+
+func TestLabelledAndOrphanVolumes(t *testing.T) {
+	dir := t.TempDir()
+	fake := dockertest.New(t)
+	wd := filepath.Join(dir, "srv", "kimai")
+	vol := filepath.Join(dir, "volumes", "kimai_mysql", "_data")
+	for _, d := range []string{wd, vol, filepath.Join(dir, "volumes", "lost", "_data")} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.WriteFile(filepath.Join(wd, "docker-compose.yml"), []byte("services: {}\n"), 0o644)
+	fake.Set()
+	fake.SetVolumes(docker.Volume{Name: "kimai_mysql", Mountpoint: vol, Project: "kimai"},
+		docker.Volume{Name: "lost", Mountpoint: filepath.Join(dir, "volumes", "lost", "_data")})
+	c := &docker.Client{Binary: fake.Bin}
+	ps, vs, err := c.ProjectsAndVolumes(context.Background(), []string{filepath.Join(dir, "srv")})
+	if err != nil || len(ps) != 1 {
+		t.Fatal(ps, err)
+	}
+	ds := ps[0].Data(docker.DataOptions{})
+	if ds.Volumes["kimai_mysql"] != vol || len(ds.Paths) != 2 {
+		t.Fatalf("a stopped project keeps its labelled volumes: %+v", ds)
+	}
+	orphans := docker.Orphans(ps, vs)
+	if len(orphans) != 1 || orphans[0].Name != "lost" {
+		t.Fatalf("orphans: %+v", orphans)
+	}
+}

@@ -101,7 +101,18 @@ a docker section.`,
 				}
 				fmt.Fprintln(tw, line)
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if all, vs, err := engine.DockerClient(job).ProjectsAndVolumes(cmd.Context(), job.Docker.ScanDirs); err == nil {
+				if orphans := docker.Orphans(all, vs); len(orphans) > 0 {
+					a.printf("\nvolumes outside every project (not backed up unless listed in the job's paths):\n")
+					for _, v := range orphans {
+						a.printf("  %s  %s\n", v.Name, v.Mountpoint)
+					}
+				}
+			}
+			return nil
 		},
 	}
 	ls.Flags().BoolVar(&withRepo, "last", false, "also show the latest snapshot of each project (opens the repository)")

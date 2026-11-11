@@ -20,6 +20,11 @@ echo "$*" >> "$D/log"
 case "$1" in
 ps) cat "$D/ids" ;;
 inspect) cat "$D/inspect.json" ;;
+volume)
+	case "$2" in
+	ls) cat "$D/volumes" 2>/dev/null ;;
+	inspect) cat "$D/volumes.json" 2>/dev/null || echo "[]" ;;
+	esac ;;
 exec)
 	shift
 	[ "$1" = "-i" ] && shift
@@ -151,4 +156,22 @@ func (f *Fake) Fail(name string) {
 // FailDump makes only database dumps in the container fail.
 func (f *Fake) FailDump(name string) {
 	_ = os.WriteFile(filepath.Join(f.Dir, "fail-dump-"+name), nil, 0o644)
+}
+
+// SetVolumes sets the volumes listed by `docker volume ls` (name -> project label).
+func (f *Fake) SetVolumes(vs ...docker.Volume) {
+	f.t.Helper()
+	var names []string
+	var out []map[string]any
+	for _, v := range vs {
+		names = append(names, v.Name)
+		labels := map[string]string{}
+		if v.Project != "" {
+			labels[docker.LabelProject] = v.Project
+		}
+		out = append(out, map[string]any{"Name": v.Name, "Mountpoint": v.Mountpoint, "Labels": labels})
+	}
+	b, _ := json.Marshal(out)
+	_ = os.WriteFile(filepath.Join(f.Dir, "volumes.json"), b, 0o644)
+	_ = os.WriteFile(filepath.Join(f.Dir, "volumes"), []byte(strings.Join(names, "\n")+"\n"), 0o644)
 }

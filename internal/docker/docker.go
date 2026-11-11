@@ -130,6 +130,70 @@ type Project struct {
 	ConfigFiles []string    `json:"config_files,omitempty"`
 	Standalone  bool        `json:"standalone,omitempty"`
 	Containers  []Container `json:"containers"`
+	// Volumes created by Compose for the project (by label), including
+	// those no container uses right now.
+	Volumes []Volume `json:"volumes,omitempty"`
+}
+
+// Volume is a Docker volume.
+type Volume struct {
+	Name       string `json:"name"`
+	Mountpoint string `json:"mountpoint"`
+	Project    string `json:"project,omitempty"`
+}
+
+// Volumes lists all volumes with their Compose project label.
+func (c *Client) Volumes(ctx context.Context) ([]Volume, error) {
+	out, err := c.output(ctx, "volume", "ls", "-q")
+	if err != nil {
+		return nil, err
+	}
+	names := strings.Fields(string(out))
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out, err = c.output(ctx, append([]string{"volume", "inspect"}, names...)...)
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Name       string            `json:"Name"`
+		Mountpoint string            `json:"Mountpoint"`
+		Labels     map[string]string `json:"Labels"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("docker volume inspect: %w", err)
+	}
+	var vs []Volume
+	for _, r := range raw {
+		vs = append(vs, Volume{Name: r.Name, Mountpoint: r.Mountpoint, Project: r.Labels[LabelProject]})
+	}
+	return vs, nil
+}
+
+// Orphans returns volumes that belong to no project and are not mounted
+// by any container: they are not part of any project backup.
+func Orphans(ps []Project, vs []Volume) []Volume {
+	used := map[string]bool{}
+	for _, p := range ps {
+		for _, c := range p.Containers {
+			for _, m := range c.Mounts {
+				if m.Type == "volume" {
+					used[m.Name] = true
+				}
+			}
+		}
+		for _, v := range p.Volumes {
+			used[v.Name] = true
+		}
+	}
+	var out []Volume
+	for _, v := range vs {
+		if !used[v.Name] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Running reports how many containers are running.
@@ -270,11 +334,21 @@ func ScanDirs(dirs []string) []Project {
 }
 
 // Projects discovers all projects: those with containers plus project
-// directories under scanDirs that have none.
+// directories under scanDirs that have none, with their labelled volumes.
 func (c *Client) Projects(ctx context.Context, scanDirs []string) ([]Project, error) {
+	ps, _, err := c.ProjectsAndVolumes(ctx, scanDirs)
+	return ps, err
+}
+
+// ProjectsAndVolumes is Projects plus the list of all volumes.
+func (c *Client) ProjectsAndVolumes(ctx context.Context, scanDirs []string) ([]Project, []Volume, error) {
 	cs, err := c.Containers(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	vs, err := c.Volumes(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
 	ps := Group(cs)
 	known := map[string]bool{}
@@ -290,7 +364,17 @@ func (c *Client) Projects(ctx context.Context, scanDirs []string) ([]Project, er
 		}
 	}
 	sort.Slice(ps, func(i, j int) bool { return ps[i].Name < ps[j].Name })
-	return ps, nil
+	for i := range ps {
+		if ps[i].Standalone {
+			continue
+		}
+		for _, v := range vs {
+			if v.Project == ps[i].Name {
+				ps[i].Volumes = append(ps[i].Volumes, v)
+			}
+		}
+	}
+	return ps, vs, nil
 }
 
 // Match reports whether name matches one of the glob patterns ("*" = all).
@@ -375,6 +459,14 @@ func (p Project) Data(o DataOptions) DataSet {
 					ds.Binds = append(ds.Binds, src)
 				}
 				paths = append(paths, src)
+			}
+		}
+	}
+	if !o.SkipVolumes {
+		for _, v := range p.Volumes {
+			if _, ok := ds.Volumes[v.Name]; !ok && usable(v.Mountpoint) {
+				ds.Volumes[v.Name] = filepath.Clean(v.Mountpoint)
+				paths = append(paths, filepath.Clean(v.Mountpoint))
 			}
 		}
 	}
