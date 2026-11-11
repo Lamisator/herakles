@@ -41,7 +41,7 @@ make build            # ./herakles for this platform
 make dist             # cross-compile linux/windows/darwin binaries into dist/
 ```
 
-Or build directly: `go build -o herakles ./cmd/herakles`. The binary is fully static (no cgo), so `GOOS=windows go build ./cmd/herakles` gives you `herakles.exe`.
+Or build directly: `CGO_ENABLED=0 go build -o herakles ./cmd/herakles`. With cgo disabled the binary is fully static, so `GOOS=windows go build ./cmd/herakles` gives you `herakles.exe`.
 
 ---
 

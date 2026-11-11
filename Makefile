@@ -5,7 +5,7 @@ PLATFORMS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/arm64
 .PHONY: build test race vet dist clean
 
 build:
-	go build -trimpath -ldflags "$(LDFLAGS)" -o herakles ./cmd/herakles
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o herakles ./cmd/herakles
 
 test:
 	go test ./...
