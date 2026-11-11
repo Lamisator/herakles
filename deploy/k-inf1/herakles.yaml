@@ -25,6 +25,8 @@ jobs:
       - /var/lib/docker/volumes
       - /etc/traefik
       - /etc/letsencrypt
+    exclude:
+      - /srv/traefik/logs                # constantly growing access log
     exclude_caches: true
     one_file_system: true
     full_interval: 7d
