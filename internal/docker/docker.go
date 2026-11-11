@@ -402,7 +402,8 @@ func (c *Client) ProjectsAndVolumes(ctx context.Context, search Search) ([]Proje
 		}
 	}
 	// Directories inside a project that has containers belong to it (e.g. a
-	// source checkout with its own compose file), not to a new project.
+	// source checkout with its own compose file), and a directory containing
+	// one is not a separate project either.
 	var owned []string
 	for _, p := range ps {
 		if p.WorkingDir != "" {
@@ -411,7 +412,7 @@ func (c *Client) ProjectsAndVolumes(ctx context.Context, search Search) ([]Proje
 	}
 	inside := func(dir string) bool {
 		for _, o := range owned {
-			if dir != o && within(dir, o) {
+			if dir != o && (within(dir, o) || within(o, dir)) {
 				return true
 			}
 		}

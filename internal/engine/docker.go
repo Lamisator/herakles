@@ -44,14 +44,19 @@ func DockerClient(job *config.Job) *docker.Client {
 
 // DockerProjects lists the projects a docker job backs up.
 func (e *Engine) DockerProjects(ctx context.Context, job *config.Job) ([]docker.Project, error) {
+	_, sel, err := e.dockerProjects(ctx, job)
+	return sel, err
+}
+
+// dockerProjects returns all projects found for the job and the selected ones.
+func (e *Engine) dockerProjects(ctx context.Context, job *config.Job) (all, out []docker.Project, err error) {
 	if job.Docker == nil {
-		return nil, fmt.Errorf("job %s has no docker section", job.Name)
+		return nil, nil, fmt.Errorf("job %s has no docker section", job.Name)
 	}
-	all, err := DockerClient(job).Projects(ctx, DockerSearch(job))
+	all, err = DockerClient(job).Projects(ctx, DockerSearch(job))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []docker.Project
 	for _, p := range all {
 		if p.Standalone && job.Docker.SkipStandalone {
 			continue
@@ -60,7 +65,38 @@ func (e *Engine) DockerProjects(ctx context.Context, job *config.Job) ([]docker.
 			out = append(out, p)
 		}
 	}
-	return out, nil
+	return all, out, nil
+}
+
+// Remainder returns what the job's own snapshot covers besides its paths:
+// the docker folders minus the data of every project found in them, so
+// that nothing in the folders is missed and nothing is stored twice.
+func Remainder(job *config.Job, all []docker.Project) (paths, excludes []string) {
+	if job.Docker == nil {
+		return nil, nil
+	}
+	for _, f := range job.Docker.Folders {
+		if _, err := os.Stat(f); err == nil {
+			paths = append(paths, filepath.Clean(f))
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	opts := docker.DataOptions{SkipVolumes: job.Docker.SkipVolumes, SkipBindMounts: job.Docker.SkipBindMounts}
+	for _, p := range all {
+		for _, d := range p.Data(opts).Paths {
+			if job.Docker.InFolders(d) != "" {
+				excludes = append(excludes, globEscape(d))
+			}
+		}
+	}
+	return paths, excludes
+}
+
+// globEscape makes a path safe to use as an exclude pattern.
+func globEscape(p string) string {
+	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[", "{", "\\{").Replace(p)
 }
 
 // DockerSearch says where a job looks for projects without containers.
@@ -77,7 +113,7 @@ func (e *Engine) DockerMetaDir(job, project string) string {
 // runDockerBackup creates one snapshot per selected project ("job/project")
 // plus one of the job's own paths, if any.
 func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *config.Repository, ro RunOptions, res *JobResult, log *slog.Logger) error {
-	projects, err := e.DockerProjects(ctx, job)
+	all, projects, err := e.dockerProjects(ctx, job)
 	if err != nil {
 		return fmt.Errorf("docker: %w", err)
 	}
@@ -129,12 +165,15 @@ func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *confi
 			return ctx.Err()
 		}
 	}
-	if len(ro.Projects) == 0 && (len(job.Paths) > 0 || len(job.Devices) > 0) {
+	// The job's own snapshot: its paths plus whatever in the docker
+	// folders belongs to no project.
+	rest, restExcl := Remainder(job, all)
+	if len(ro.Projects) == 0 && (len(job.Paths) > 0 || len(job.Devices) > 0 || len(rest) > 0) {
 		var paths []string
 		for _, p := range job.Paths {
 			paths = append(paths, config.ExpandHome(p))
 		}
-		u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: paths, Devices: job.Devices}, ro, log)
+		u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: append(paths, rest...), Devices: job.Devices, Excludes: restExcl}, ro, log)
 		if err != nil {
 			return fmt.Errorf("paths: %w", err)
 		}

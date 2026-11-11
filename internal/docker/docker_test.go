@@ -232,7 +232,11 @@ func TestScanSkipsDirsInsideProjects(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "srv", "archive", "old"), 0o755)
 	os.WriteFile(filepath.Join(dir, "srv", "archive", "old", "compose.yml"), []byte("services: {}\n"), 0o644)
 	fake := dockertest.New(t)
-	fake.Set(dockertest.Container{Name: "pyxis-app", Image: "x", Project: "pyxis", WorkingDir: wd, Running: true})
+	// A checkout that contains the compose folder of a running project.
+	os.MkdirAll(filepath.Join(dir, "srv", "app", "repo", "deploy"), 0o755)
+	os.WriteFile(filepath.Join(dir, "srv", "app", "repo", "compose.yml"), []byte("services: {}\n"), 0o644)
+	fake.Set(dockertest.Container{Name: "pyxis-app", Image: "x", Project: "pyxis", WorkingDir: wd, Running: true},
+		dockertest.Container{Name: "app-1", Image: "x", Project: "app", WorkingDir: filepath.Join(dir, "srv", "app", "repo", "deploy"), Running: true})
 	ps, err := (&docker.Client{Binary: fake.Bin}).Projects(context.Background(), docker.Search{Trees: []string{filepath.Join(dir, "srv")}})
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +245,7 @@ func TestScanSkipsDirsInsideProjects(t *testing.T) {
 	for _, p := range ps {
 		names = append(names, p.Name)
 	}
-	if strings.Join(names, ",") != "old,pyxis" {
+	if strings.Join(names, ",") != "app,old,pyxis" {
 		t.Fatal("a directory inside a project became a project:", names)
 	}
 }

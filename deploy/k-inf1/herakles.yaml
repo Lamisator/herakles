@@ -25,9 +25,8 @@ jobs:
     repository: storagebox
     docker:
       folders: [/srv]                        # every project in /srv, also ones created later
-    paths:                                   # host data that belongs to no project
-      - /srv/docker-archive
-      - /srv/dudle
+    # Everything else in /srv (e.g. /srv/docker-archive, /srv/dudle) goes into
+    # the job's own snapshot "docker" automatically.
     exclude:
       - /srv/traefik/logs                    # constantly growing access log
     exclude_caches: true

@@ -10,6 +10,7 @@ import (
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/docker"
 	"github.com/lamisator/herakles/internal/docker/dockertest"
+	"github.com/lamisator/herakles/internal/repository"
 )
 
 type dockerEnv struct {
@@ -286,9 +287,27 @@ func TestDockerFoldersIncludeNewProjects(t *testing.T) {
 	if got := strings.Join(names(), ","); got != "blog,newapp,shop" {
 		t.Fatal("new project not picked up:", got)
 	}
+	write(t, filepath.Join(srv, "notes.txt"), "belongs to no project")
 	res, err := d.e.RunJob(ctx, "containers", RunOptions{})
-	if err != nil || len(res.Projects) != 3 {
+	if err != nil || len(res.Projects) != 3 || res.Snapshot == "" {
 		t.Fatalf("%+v %v", res, err)
+	}
+	// The job's own snapshot holds what belongs to no project, and no
+	// project data (that is in the project snapshots).
+	repo, _, err := d.e.OpenByName(ctx, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := repo.FindSnapshot(ctx, res.Snapshot, repository.SnapshotFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	repo.Walk(ctx, snap.Tree, func(p string, n *repository.Node) error { files = append(files, filepath.Base(p)); return nil })
+	repo.Close()
+	joined := "," + strings.Join(files, ",") + ","
+	if !strings.Contains(joined, ",notes.txt,") || strings.Contains(joined, ",.env,") || strings.Contains(joined, ",a.jpg,") || strings.Contains(joined, ",app.conf,") {
+		t.Fatalf("remainder snapshot: %s", joined)
 	}
 	// Explicit names and folders combine; exclusions win.
 	job.Docker.Folders, job.Docker.Projects, job.Docker.ExcludeProjects = []string{filepath.Join(srv, "shop")}, []string{"cache"}, []string{"shop"}

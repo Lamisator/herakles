@@ -104,6 +104,12 @@ a docker section.`,
 			if err := tw.Flush(); err != nil {
 				return err
 			}
+			if len(job.Docker.Folders) > 0 || len(job.Paths) > 0 {
+				a.printf("\nsnapshot %s (the job itself): %s\n", job.Name, strings.Join(append(append([]string{}, job.Paths...), job.Docker.Folders...), ", "))
+				if len(job.Docker.Folders) > 0 {
+					a.printf("  everything in the folders that belongs to no project\n")
+				}
+			}
 			if all, vs, err := engine.DockerClient(job).ProjectsAndVolumes(cmd.Context(), engine.DockerSearch(job)); err == nil {
 				if orphans := docker.Orphans(all, vs); len(orphans) > 0 {
 					a.printf("\nvolumes outside every project (not backed up unless listed in the job's paths):\n")

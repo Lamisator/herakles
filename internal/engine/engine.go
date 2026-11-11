@@ -379,10 +379,11 @@ func (e *Engine) runBackup(ctx context.Context, job *config.Job, rc *config.Repo
 
 // unit is one snapshot of a job: the job itself, or one Docker project.
 type unit struct {
-	Name    string // snapshot job name: "job" or "job/project"
-	Paths   []string
-	Devices []string
-	Docker  *repository.DockerInfo
+	Name     string // snapshot job name: "job" or "job/project"
+	Paths    []string
+	Devices  []string
+	Excludes []string // in addition to the job's
+	Docker   *repository.DockerInfo
 }
 
 type unitResult struct {
@@ -412,7 +413,7 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	typ, parent := ResolveType(&uj, ro.Type, snaps, host, time.Now())
 	maxSize, _ := config.ParseSize(job.ExcludeLargerThan)
 	a, err := archiver.New(repo, archiver.Options{
-		Paths: u.Paths, Devices: u.Devices, Excludes: job.Exclude, ExcludeIfPresent: job.ExcludeIfPresent,
+		Paths: u.Paths, Devices: u.Devices, Excludes: append(append([]string(nil), job.Exclude...), u.Excludes...), ExcludeIfPresent: job.ExcludeIfPresent,
 		ExcludeCaches: job.ExcludeCaches, ExcludeLargerThan: maxSize, OneFileSystem: job.OneFileSystem,
 		Type: typ, Parent: parent, Job: u.Name, Hostname: host, Tags: job.Tags, Docker: u.Docker,
 		FileWorkers: job.FileWorkers, Progress: ro.Progress,

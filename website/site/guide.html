@@ -489,7 +489,7 @@ services:
 <table>
 <tr><th>Setting</th><th>Effect</th></tr>
 <tr><td>neither <code>projects</code> nor <code>folders</code></td><td>Every project on the host, including ones created later.</td></tr>
-<tr><td><code>folders: [/srv]</code></td><td>Every project whose directory is inside <code>/srv</code> (for standalone containers: a bind mount inside it), <strong>including projects created later</strong>. The folders are also searched up to three levels deep for project directories whose containers don't exist right now.</td></tr>
+<tr><td><code>folders: [/srv]</code></td><td>Every project whose directory is inside <code>/srv</code> (for standalone containers: a bind mount inside it), <strong>including projects created later</strong>. The folders are also searched up to three levels deep for project directories whose containers don't exist right now. Everything else in the folders (files that belong to no project) goes into the job's own snapshot <code>JOB</code>, so nothing in them is missed and nothing is stored twice.</td></tr>
 <tr><td><code>projects: [wiki, shop-*]</code></td><td>These projects (names or glob patterns), in addition to the folders.</td></tr>
 <tr><td><code>exclude_projects: [portainer]</code></td><td>Always left out.</td></tr>
 <tr><td><code>stop: [zammad]</code></td><td>Stopped during their backup instead of dumping their databases.</td></tr>
