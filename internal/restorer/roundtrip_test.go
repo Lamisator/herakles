@@ -386,3 +386,23 @@ func TestCancelledBackupLeavesUsableRepository(t *testing.T) {
 		t.Fatalf("after prune: %+v", res)
 	}
 }
+
+func TestExcludedSourcePathIsSkipped(t *testing.T) {
+	repo, _ := tu.NewRepo(t)
+	src := t.TempDir()
+	tu.WriteFile(t, filepath.Join(src, "app", "data.txt"), []byte("keep"))
+	tu.WriteFile(t, filepath.Join(src, "logs", "access.log"), []byte("growing"))
+	logs := filepath.Join(src, "logs")
+	// A source that matches an exclude pattern (e.g. a bind-mounted log
+	// directory of a Docker project) is left out entirely.
+	snap := backup(t, repo, archiver.Options{Paths: []string{filepath.Join(src, "app"), logs}, Excludes: []string{logs}})
+	var got []string
+	repo.Walk(context.Background(), snap.Tree, func(p string, n *repository.Node) error {
+		got = append(got, filepath.Base(p))
+		return nil
+	})
+	joined := strings.Join(got, ",")
+	if strings.Contains(joined, "access.log") || !strings.Contains(joined, "data.txt") {
+		t.Fatal(joined)
+	}
+}

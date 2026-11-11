@@ -96,6 +96,13 @@ func TestDockerBackupAndRestore(t *testing.T) {
 	if _, ok := byName["cache"]; ok {
 		t.Fatal("excluded project backed up")
 	}
+	var added int64
+	for _, p := range res.Projects {
+		added += p.Summary.BytesAdded
+	}
+	if added != res.Summary.BytesAdded || byName["blog"].Summary.BytesAdded >= byName["shop"].Summary.BytesAdded {
+		t.Fatalf("per-project figures must not accumulate: %d vs %d", added, res.Summary.BytesAdded)
+	}
 	snaps, err := e.ProjectSnapshots(ctx, "containers/shop")
 	if err != nil || len(snaps) != 1 {
 		t.Fatal(snaps, err)

@@ -209,10 +209,15 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 		}
 		return nil
 	}
-	// Sort so parents are added before children.
+	// Sort so parents are added before children. A source that matches an
+	// exclude pattern itself (e.g. a bind-mounted log directory of a
+	// Docker project) is skipped like anything below a source.
 	srcs := append([]string(nil), a.opts.Paths...)
 	sort.Strings(srcs)
 	for _, p := range srcs {
+		if abs, err := filepath.Abs(p); err == nil && a.filter.Excluded(abs) {
+			continue
+		}
 		if err := add(p, false); err != nil {
 			return nil, nil, err
 		}
@@ -232,6 +237,9 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 	start := time.Now()
 	a.prog.setStart(start)
+	// The progress may be shared by several snapshots of one job run (Docker
+	// projects): the summary only counts what this snapshot added.
+	storedBefore, newBefore := a.prog.bytesStored.Load(), a.prog.bytesNew.Load()
 	vroot, paths, err := a.buildVTree()
 	if err != nil {
 		return nil, err
@@ -284,8 +292,8 @@ func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 		snapTime = start
 	}
 	a.summary.Start, a.summary.End = start.UTC(), time.Now().UTC()
-	a.summary.BytesStored = a.prog.bytesStored.Load()
-	a.summary.BytesAdded = a.prog.bytesNew.Load()
+	a.summary.BytesStored = a.prog.bytesStored.Load() - storedBefore
+	a.summary.BytesAdded = a.prog.bytesNew.Load() - newBefore
 	sum := a.summary
 	snap := &repository.Snapshot{
 		Time: snapTime.UTC(), Tree: treeID, Paths: paths, Hostname: a.opts.Hostname, Username: uname,

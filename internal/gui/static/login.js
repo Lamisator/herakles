@@ -76,4 +76,7 @@ async function init() {
     } catch (err) { showError(err.message); }
   });
 }
+// Opening the setup link in a tab that already shows this page only
+// changes the fragment.
+window.addEventListener('hashchange', () => location.reload());
 init().catch(e => showError(e.message));

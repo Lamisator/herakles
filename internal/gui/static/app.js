@@ -744,8 +744,8 @@ async function dockerRestore(job, p) {
   const info = h('div', { class: 'meta' });
   const showInfo = () => {
     const s = snaps.find(x => x.id === sel.value);
-    clear(info).append(s && s.dumps ? 'Dumps: ' + s.dumps.join(', ') : 'No database dumps in this snapshot.',
-      s && s.failed_dumps ? h('div', { style: 'color:var(--err)' }, 'Failed dumps: ' + s.failed_dumps.join('; ')) : null);
+    clear(info).append(s && s.dumps ? 'Dumps: ' + s.dumps.join(', ') : 'No database dumps in this snapshot.');
+    if (s && s.failed_dumps) info.append(h('div', { style: 'color:var(--err)' }, 'Failed dumps: ' + s.failed_dumps.join('; ')));
   };
   sel.addEventListener('change', showInfo);
   showInfo();
