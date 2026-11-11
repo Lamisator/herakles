@@ -224,52 +224,313 @@ function renderDaemon(info) {
   }
 }
 
+// ---------- systems (backed-up hosts) ----------
+// systemIcon guesses what kind of machine a host is from its snapshots.
+function systemIcon(snaps) {
+  if (snaps.some(s => (s.paths || []).some(p => /^[A-Za-z]:\\|^\\\\/.test(p)))) return ['desktop', 'Windows'];
+  if (snaps.some(s => s.docker)) return ['server', 'Server with Docker'];
+  return ['server', 'Linux / Unix'];
+}
+function freshness(t) {
+  const h = (Date.now() - new Date(t).getTime()) / 3600e3;
+  return h < 26 ? ['success', 'up to date'] : h < 24 * 8 ? ['warning', 'older than a day'] : ['failure', 'older than a week'];
+}
+
+views.systems = async main => {
+  main.append(h('h1', {}, 'Systems'), h('div', { class: 'sub' }, 'Every computer that has backups in one of the repositories. Click a system to see its backups.'));
+  const cfg = await loadConfig();
+  const repos = cfg.repositories || [];
+  if (!repos.length) { main.append(h('div', { class: 'empty' }, 'No repositories configured.')); return; }
+  const box = h('div', {}, h('div', { class: 'muted' }, 'Loading…'));
+  main.append(box);
+  const hosts = new Map();
+  const problems = [];
+  for (const r of repos) {
+    let snaps;
+    try { snaps = await api('GET', '/api/repos/' + encodeURIComponent(r.name) + '/snapshots'); }
+    catch (e) { problems.push(r.name + ': ' + e.message); continue; }
+    for (const s of snaps || []) {
+      if (!hosts.has(s.hostname)) hosts.set(s.hostname, { name: s.hostname, snaps: [], repos: new Map() });
+      const x = hosts.get(s.hostname);
+      x.snaps.push(s);
+      x.repos.set(r.name, (x.repos.get(r.name) || 0) + 1);
+      s.repo = r.name;
+    }
+  }
+  clear(box);
+  if (problems.length) box.append(h('div', { class: 'notice warn' }, icon('alert'), 'Some repositories could not be read: ' + problems.join('; ')));
+  if (!hosts.size) { box.append(h('div', { class: 'empty' }, 'No backups yet.')); return; }
+  const open = (host, repo) => { state.snapRepo = repo; state.snapHost = host; navigate('snapshots'); };
+  const grid = h('div', { class: 'sys-grid' });
+  box.append(grid);
+  for (const x of [...hosts.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+    const newest = x.snaps.reduce((a, s) => !a || s.time > a.time ? s : a, null);
+    const [fcls, ftext] = freshness(newest.time);
+    const [ic, kindText] = systemIcon(x.snaps);
+    const jobs = [...new Set(x.snaps.map(s => s.job || 'no job'))].sort();
+    const stored = x.snaps.reduce((n, s) => n + (s.summary ? s.summary.bytes_stored : 0), 0);
+    const kinds = [...new Map(x.snaps.map(s => { const k = snapKind(s); return [k.key, k]; })).values()];
+    const errs = x.snaps.filter(s => s.summary && s.summary.errors > 0).length;
+    const repoNames = [...x.repos.keys()];
+    grid.append(h('div', { class: 'sys-card' },
+      h('button', { class: 'sys-main', title: 'Show the backups of ' + x.name, onclick: () => open(x.name, repoNames.reduce((a, b) => x.repos.get(b) > x.repos.get(a) ? b : a, newest.repo)) },
+        h('span', { class: 'sys-ico' }, icon(ic), h('span', { class: 'sys-dot ' + fcls, title: ftext })),
+        h('span', { class: 'sys-text' },
+          h('b', {}, x.name),
+          h('span', { class: 'muted small' }, kindText),
+          h('span', { class: 'sys-last' }, 'Last backup ', h('strong', {}, ago(newest.time)), ' ', h('span', { class: 'badge ' + fcls }, ftext))),
+        h('span', { class: 'sys-go' }, icon('next'))),
+      h('div', { class: 'sys-facts' },
+        h('span', {}, icon('snapshots'), x.snaps.length + ' snapshots'),
+        h('span', {}, icon('jobs'), jobs.length + (jobs.length === 1 ? ' job' : ' jobs')),
+        h('span', {}, icon('repos'), fmtBytes(stored) + ' stored'),
+        errs ? h('span', { class: 'warn' }, icon('alert'), errs + ' with read errors') : null),
+      h('div', { class: 'sys-kinds' }, kinds.map(k => h('span', { class: 'chip' }, icon(k.icon), k.label)),
+        jobs.slice(0, 6).map(j => h('span', { class: 'chip mono' }, j)), jobs.length > 6 ? h('span', { class: 'chip' }, '+' + (jobs.length - 6)) : null),
+      repoNames.length > 1 ? h('div', { class: 'sys-repos' }, h('span', { class: 'muted small' }, 'Repositories:'),
+        repoNames.map(rn => h('button', { class: 'small', onclick: () => open(x.name, rn) }, icon('repos'), rn + ' (' + x.repos.get(rn) + ')'))) : null));
+  }
+};
+
 // ---------- snapshots ----------
+const SNAP_TYPES = [['full', 'Full'], ['incremental', 'Incremental'], ['differential', 'Differential']];
+const TYPE_RANK = { full: 0, differential: 1, incremental: 2 };
+const isDevPath = p => /^\/dev\/|^\\\\\.\\/.test(p);
+// snapKind tells what a snapshot holds: a Docker project, disk images or files.
+function snapKind(s) {
+  if (s.docker) return { key: 'docker', icon: s.docker.databases && s.docker.databases.length ? 'database' : 'containers', label: 'Docker project' };
+  if ((s.paths || []).length && s.paths.every(isDevPath)) return { key: 'disk', icon: 'disk', label: 'Disk image' };
+  return { key: 'files', icon: 'folder', label: 'Files and folders' };
+}
+function typeChip(t) { return h('span', { class: 'chip type-' + t }, icon(t), t); }
+function iconBtn(name, title, onclick, cls) {
+  return h('button', { class: 'small icon-only ' + (cls || ''), title, 'aria-label': title, onclick }, icon(name));
+}
+function loadPref(key, def) {
+  try { return Object.assign({}, def, JSON.parse(localStorage.getItem(key) || '{}')); } catch (e) { return def; }
+}
+function savePref(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
+
 views.snapshots = async main => {
   const cfg = await loadConfig();
   main.append(h('h1', {}, 'Snapshots & Restore'), h('div', { class: 'sub' }, 'Browse backups in the explorer, restore or download files, folders or whole snapshots, compare snapshots.'));
   const repos = cfg.repositories || [];
   if (!repos.length) { main.append(h('div', { class: 'empty' }, 'No repositories configured.')); return; }
   if (!state.snapRepo || !repos.find(r => r.name === state.snapRepo)) state.snapRepo = repos[0].name;
+  const pref = loadPref('herakles.snapView', { sort: 'time', desc: true, group: 'none', type: '' });
+  const keep = () => savePref('herakles.snapView', pref);
   const sel = h('select', { style: 'width:auto', onchange: e => { state.snapRepo = e.target.value; load(); } },
     repos.map(r => h('option', { value: r.name, selected: r.name === state.snapRepo }, r.name)));
-  const jobFilter = h('input', { placeholder: 'filter (job, host, tag, id)…', style: 'width:240px', value: state.snapFilter || '', oninput: () => renderTable() });
+  const hostSel = h('select', { style: 'width:auto', 'aria-label': 'System', onchange: e => { state.snapHost = e.target.value; renderTypes(); render(); } });
+  const filter = h('input', { type: 'search', class: 'snap-filter', placeholder: 'Filter: job, host, path, tag, ID…', value: state.snapFilter || '', oninput: () => render() });
   state.snapFilter = '';
+  const typeBox = h('div', { class: 'seg' });
+  const groupSel = h('select', { style: 'width:auto', onchange: e => { pref.group = e.target.value; keep(); render(); } },
+    [['none', 'No grouping'], ['type', 'Backup type'], ['job', 'Job'], ['kind', 'Content'], ['day', 'Day'], ['host', 'System']]
+      .map(([v, t]) => h('option', { value: v, selected: pref.group === v }, t)));
   const diffBtn = h('button', { disabled: true, onclick: () => diffSelected() }, 'Compare selected');
+  const forgetBtn = h('button', { class: 'danger', disabled: true, onclick: () => forgetSelected() }, 'Forget selected');
+  const stats = h('div', { class: 'stat-strip' });
   const tableBox = h('div');
-  main.append(h('div', { class: 'toolbar' }, 'Repository', sel, jobFilter, h('span', { class: 'spacer' }), diffBtn,
-    h('button', { onclick: () => load() }, 'Reload')), tableBox);
+  main.append(
+    h('div', { class: 'toolbar' }, h('label', { class: 'inline' }, icon('repos'), 'Repository'), sel,
+      h('label', { class: 'inline' }, icon('systems'), 'System'), hostSel, filter, h('span', { class: 'spacer' }),
+      h('button', { onclick: () => load() }, 'Reload')),
+    stats,
+    h('div', { class: 'toolbar' }, typeBox, h('label', { class: 'inline' }, 'Group by'), groupSel, h('span', { class: 'spacer' }), diffBtn, forgetBtn),
+    tableBox);
   let snaps = [];
   const picked = new Set();
-  const renderTable = () => {
-    clear(tableBox);
-    const q = jobFilter.value.toLowerCase();
-    const list = snaps.filter(s => !q || [s.id, s.job, s.hostname, s.type, ...(s.tags || [])].join(' ').toLowerCase().includes(q));
-    if (!list.length) { tableBox.append(h('div', { class: 'empty' }, snaps.length ? 'No snapshot matches the filter.' : 'No snapshots in this repository yet.')); return; }
-    tableBox.append(h('table', {},
-      h('tr', {}, ['', 'ID', 'Time', 'Job', 'Host', 'Type', 'Size', 'Stored', 'Paths', ''].map(t => h('th', {}, t))),
-      list.map(s => h('tr', {},
-        h('td', {}, h('input', { type: 'checkbox', style: 'width:auto', checked: picked.has(s.id), onchange: e => { e.target.checked ? picked.add(s.id) : picked.delete(s.id); diffBtn.disabled = picked.size !== 2; } })),
-        h('td', { class: 'mono' }, s.id.slice(0, 8)), h('td', {}, fmtTime(s.time)), h('td', {}, s.job || '-'), h('td', {}, s.hostname),
-        h('td', {}, h('span', { class: 'chip' }, s.type)), h('td', {}, s.summary ? fmtBytes(s.summary.total_bytes) : '-'),
-        h('td', {}, s.summary ? fmtBytes(s.summary.bytes_stored) : '-'), h('td', { class: 'wrap' }, (s.paths || []).join(', ')),
-        h('td', { class: 'nowrap' }, h('button', { class: 'small', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: s }) }, 'Browse'), ' ',
-          h('button', { class: 'small', onclick: () => downloadDlg(state.snapRepo, s, ['/']) }, 'Download'), ' ',
-          h('button', { class: 'small', onclick: () => restoreDlg(state.snapRepo, s, ['/']) }, 'Restore'), ' ',
-          h('button', { class: 'small danger', onclick: () => forget(s) }, 'Forget'))))));
+  const open = new Set();
+  const updateSel = () => {
+    diffBtn.disabled = picked.size !== 2;
+    forgetBtn.disabled = !picked.size;
+    forgetBtn.lastChild.nodeValue = picked.size ? 'Forget ' + picked.size + ' selected' : 'Forget selected';
   };
+
+  const COLS = [
+    { key: 'id', label: 'ID' }, { key: 'time', label: 'Time' }, { key: 'job', label: 'Job / system' },
+    { key: 'type', label: 'Type' }, { key: 'size', label: 'Size', num: true }, { key: 'stored', label: 'Stored', num: true }, { key: '', label: 'Contents' }];
+  const val = (s, k) => ({
+    id: s.id, time: s.time, job: (s.job || '').toLowerCase(), host: (s.hostname || '').toLowerCase(), type: TYPE_RANK[s.type] ?? 9,
+    size: s.summary ? s.summary.total_bytes : -1, stored: s.summary ? s.summary.bytes_stored : -1,
+  })[k];
+  const GROUPS = {
+    type: s => [TYPE_RANK[s.type] ?? 9, s.type, typeChip(s.type)],
+    job: s => [s.job || '~', s.job || 'no job', h('span', {}, icon(snapKind(s).icon), s.job || 'no job')],
+    kind: s => { const k = snapKind(s); return [k.key, k.label, h('span', {}, icon(k.icon), k.label)]; },
+    day: s => { const d = new Date(s.time); const k = d.toDateString(); return [-d.setHours(0, 0, 0, 0), k, h('span', {}, icon('calendar'), d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))]; },
+    host: s => [s.hostname, s.hostname, h('span', {}, icon('server'), s.hostname)],
+  };
+
+  const scoped = () => snaps.filter(s => !state.snapHost || s.hostname === state.snapHost);
+  const renderHosts = () => {
+    const hosts = [...new Set(snaps.map(s => s.hostname))].sort();
+    if (state.snapHost && !hosts.includes(state.snapHost)) hosts.push(state.snapHost);
+    clear(hostSel).append(h('option', { value: '' }, 'All systems (' + hosts.length + ')'),
+      ...hosts.map(x => h('option', { value: x }, x)));
+    hostSel.value = state.snapHost || '';
+  };
+  const renderStats = () => {
+    clear(stats);
+    const snaps = scoped();
+    if (!snaps.length) return;
+    const jobs = new Set(snaps.map(s => s.job || ''));
+    const newest = snaps.reduce((a, s) => !a || s.time > a.time ? s : a, null);
+    const stored = snaps.reduce((n, s) => n + (s.summary ? s.summary.bytes_stored : 0), 0);
+    const errs = snaps.filter(s => s.summary && s.summary.errors > 0).length;
+    const stat = (ic, k, v, cls) => h('div', { class: 'stat ' + (cls || '') }, icon(ic), h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v)));
+    stats.append(
+      stat('snapshots', 'Snapshots', String(snaps.length)),
+      stat('jobs', 'Jobs', String(jobs.size)),
+      stat('clock', 'Latest backup', ago(newest.time)),
+      stat('repos', 'Stored', fmtBytes(stored)),
+      errs ? stat('alert', 'With read errors', String(errs), 'warn') : stat('check', 'Read errors', 'none', 'ok'));
+  };
+
+  const renderTypes = () => {
+    clear(typeBox);
+    const snaps = scoped();
+    const count = t => snaps.filter(s => !t || s.type === t).length;
+    for (const [t, label] of [['', 'All types'], ...SNAP_TYPES]) {
+      const n = count(t);
+      if (t && !n && pref.type !== t) continue;
+      typeBox.append(h('button', { class: (pref.type === t ? 'on ' : '') + (t ? 'type-' + t : ''), onclick: () => { pref.type = t; keep(); renderTypes(); render(); } },
+        t ? icon(t) : icon('snapshots'), label, h('span', { class: 'n' }, String(n))));
+    }
+  };
+
+  const contents = s => {
+    const k = snapKind(s);
+    const paths = s.paths || [];
+    if (s.docker) {
+      const d = s.docker;
+      const extra = Object.keys(d.volumes || {}).length + (d.binds || []).length;
+      return h('div', { class: 'snap-paths' }, h('span', { class: 'mono' }, d.home || d.working_dir || paths[0] || d.project),
+        extra ? h('span', { class: 'more' }, '+ ' + extra + (extra === 1 ? ' volume' : ' volumes and bind mounts')) : null,
+        d.databases && d.databases.length ? h('span', { class: 'chip' }, icon('database'), d.databases.join(', ')) : null);
+    }
+    return h('div', { class: 'snap-paths', title: paths.join('\n') }, h('span', { class: 'mono' }, paths[0] || '-'),
+      paths.length > 1 ? h('span', { class: 'more' }, '+ ' + (paths.length - 1) + ' more') : null,
+      k.key === 'disk' ? h('span', { class: 'chip' }, icon('disk'), 'image') : null);
+  };
+
+  const details = s => {
+    const sm = s.summary;
+    const kv = (k, v) => v === null || v === undefined || v === '' ? [] : [h('div', {}, k), h('div', {}, v)];
+    const n = x => (x || 0).toLocaleString();
+    const short = id => id ? id.slice(0, 8) : '';
+    const parent = s.parent && snaps.find(x => x.id === s.parent);
+    return h('div', { class: 'snap-details' },
+      h('div', { class: 'kv' },
+        kv('Snapshot', h('span', { class: 'mono' }, s.id)),
+        kv('Created', fmtTime(s.time) + (sm && sm.end && !sm.end.startsWith('0001') ? ' · took ' + fmtDur((new Date(sm.end) - new Date(sm.start)) * 1e6) : '')),
+        kv('Based on', s.parent ? h('span', {}, h('span', { class: 'mono' }, short(s.parent)), parent ? ' (' + parent.type + ', ' + fmtTime(parent.time) + ')' : ' (no longer in the repository)') : (s.type === 'full' ? 'nothing (self-contained full backup)' : null)),
+        kv('Files', sm ? n(sm.total_files) + ' files · ' + n(sm.files_new) + ' new, ' + n(sm.files_changed) + ' changed, ' + n(sm.files_unmodified) + ' unchanged' : null),
+        kv('Data', sm ? fmtBytes(sm.total_bytes) + ' in the snapshot · ' + fmtBytes(sm.bytes_added) + ' new data · ' + fmtBytes(sm.bytes_stored) + ' written after compression' : null),
+        kv('Read errors', sm && sm.errors ? h('div', { class: 'err-text' }, sm.errors + ' file(s) could not be read', (sm.error_samples || []).map(e => h('div', { class: 'mono' }, e))) : null),
+        kv('Docker project', s.docker ? s.docker.project + (s.docker.standalone ? ' (standalone container)' : '') : null),
+        kv('Tags', (s.tags || []).length ? h('span', {}, s.tags.map(t => h('span', { class: 'chip' }, t))) : null),
+        kv('User', s.username),
+        kv('Program', s.program_version ? 'Herakles ' + s.program_version : null)),
+      h('div', { class: 'k-head' }, 'Backed-up paths'),
+      h('ul', { class: 'pathlist mono' }, (s.paths || []).map(p => h('li', {}, p))));
+  };
+
+  let oneHost = false;
+  const row = s => {
+    const k = snapKind(s);
+    const errs = s.summary && s.summary.errors;
+    const tr = h('tr', { class: 'snap-row' + (picked.has(s.id) ? ' selected' : '') + (open.has(s.id) ? ' open' : ''),
+      onclick: e => { if (e.target.closest('button, input, a')) return; open.has(s.id) ? open.delete(s.id) : open.add(s.id); render(); } },
+      h('td', { class: 'cb' }, h('input', { type: 'checkbox', checked: picked.has(s.id), 'aria-label': 'Select ' + s.id.slice(0, 8),
+        onchange: e => { e.target.checked ? picked.add(s.id) : picked.delete(s.id); tr.classList.toggle('selected', e.target.checked); updateSel(); } })),
+      h('td', {}, h('span', { class: 'snap-id' }, h('span', { class: 'twisty' }, '▸'), h('span', { class: 'mono' }, s.id.slice(0, 8)))),
+      h('td', { title: fmtTime(s.time) }, h('div', {}, ago(s.time)), h('div', { class: 'muted small' }, new Date(s.time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }))),
+      h('td', {}, h('div', { class: 'job-cell', title: k.label }, icon(k.icon, 'kind kind-' + k.key), s.job || h('span', { class: 'muted' }, 'no job')),
+        oneHost ? null : h('div', { class: 'job-cell muted small host-line' }, icon('server'), s.hostname)),
+      h('td', {}, typeChip(s.type), errs ? h('span', { class: 'chip warn', title: errs + ' file(s) could not be read' }, icon('alert'), errs) : null),
+      h('td', { class: 'num' }, s.summary ? fmtBytes(s.summary.total_bytes) : '-'),
+      h('td', { class: 'num' }, s.summary ? h('div', {}, fmtBytes(s.summary.bytes_stored),
+        s.summary.total_bytes && s.summary.bytes_stored < s.summary.total_bytes ? h('div', { class: 'muted small' },
+          s.summary.bytes_stored ? Math.max(0.1, s.summary.bytes_stored / s.summary.total_bytes * 100).toFixed(1) + ' % of size' : 'nothing new') : null) : '-'),
+      h('td', { class: 'paths-cell' }, contents(s)),
+      h('td', { class: 'nowrap actions-cell' },
+        h('button', { class: 'small', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: s }) }, 'Browse'),
+        iconBtn('download', 'Download the whole snapshot', () => downloadDlg(state.snapRepo, s, ['/'])),
+        iconBtn('restore', 'Restore the whole snapshot', () => restoreDlg(state.snapRepo, s, ['/'])),
+        iconBtn('trash', 'Forget this snapshot', () => forget([s]), 'danger')));
+    const out = [tr];
+    if (open.has(s.id)) out.push(h('tr', { class: 'snap-more' }, h('td', {}), h('td', { colspan: COLS.length + 1 }, details(s))));
+    return out;
+  };
+
+  const render = () => {
+    renderStats();
+    clear(tableBox);
+    const q = filter.value.toLowerCase().trim();
+    const snaps = scoped();
+    oneHost = new Set(snaps.map(s => s.hostname)).size === 1;
+    const cols = COLS.map(c => c.key === 'job' && oneHost ? { key: 'job', label: 'Job' } : c);
+    let list = snaps.filter(s => (!pref.type || s.type === pref.type) &&
+      (!q || [s.id, s.job, s.hostname, s.type, ...(s.tags || []), ...(s.paths || []), s.docker && s.docker.project].join(' ').toLowerCase().includes(q)));
+    if (!list.length) {
+      tableBox.append(h('div', { class: 'empty' }, snaps.length ? 'No snapshot matches the filter.' : state.snapHost ? 'No snapshots of ' + state.snapHost + ' in this repository.' : 'No snapshots in this repository yet.'));
+      return;
+    }
+    const cmp = (a, b) => {
+      const x = val(a, pref.sort), y = val(b, pref.sort);
+      const c = x < y ? -1 : x > y ? 1 : 0;
+      return (pref.desc ? -c : c) || (b.time < a.time ? -1 : b.time > a.time ? 1 : 0);
+    };
+    list = list.slice().sort(cmp);
+    const head = h('tr', {}, h('th', { class: 'cb' }, h('input', { type: 'checkbox', 'aria-label': 'Select all shown',
+      checked: list.every(s => picked.has(s.id)), onchange: e => { list.forEach(s => e.target.checked ? picked.add(s.id) : picked.delete(s.id)); updateSel(); render(); } })),
+    cols.map(c => c.key ? h('th', { class: 'sortable' + (pref.sort === c.key ? ' on' : '') + (c.num ? ' num' : ''),
+      onclick: () => { pref.desc = pref.sort === c.key ? !pref.desc : ['time', 'size', 'stored'].includes(c.key); pref.sort = c.key; keep(); render(); } },
+    c.label, pref.sort === c.key ? (pref.desc ? ' ↓' : ' ↑') : '') : h('th', {}, c.label)), h('th', {}));
+    const body = [];
+    if (pref.group !== 'none' && GROUPS[pref.group]) {
+      const groups = new Map();
+      for (const s of list) {
+        const [rank, key, label] = GROUPS[pref.group](s);
+        if (!groups.has(key)) groups.set(key, { rank, label, items: [] });
+        groups.get(key).items.push(s);
+      }
+      const sorted = [...groups.values()].sort((a, b) => a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0);
+      for (const g of sorted) {
+        const stored = g.items.reduce((n, s) => n + (s.summary ? s.summary.bytes_stored : 0), 0);
+        body.push(h('tr', { class: 'group-row' }, h('td', { colspan: cols.length + 2 },
+          g.label, h('span', { class: 'muted' }, ' · ' + g.items.length + (g.items.length === 1 ? ' snapshot' : ' snapshots') + ' · ' + fmtBytes(stored) + ' stored'))));
+        g.items.forEach(s => body.push(...row(s)));
+      }
+    } else list.forEach(s => body.push(...row(s)));
+    tableBox.append(h('div', { class: 'table-scroll' }, h('table', { class: 'snap-table' }, head, body)),
+      h('div', { class: 'hint' }, list.length === snaps.length ? list.length + ' snapshots' : list.length + ' of ' + snaps.length + ' snapshots shown',
+        ' · click a row for details, click a column title to sort'));
+  };
+
   const load = async () => {
     clear(tableBox).append(h('div', { class: 'muted' }, 'Loading…'));
-    picked.clear(); diffBtn.disabled = true;
+    picked.clear(); open.clear(); updateSel();
     try { snaps = await api('GET', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots'); }
-    catch (e) { clear(tableBox).append(h('div', { class: 'empty' }, e.message)); return; }
-    renderTable();
+    catch (e) { snaps = []; renderStats(); clear(tableBox).append(h('div', { class: 'empty' }, e.message)); return; }
+    renderHosts();
+    renderTypes();
+    render();
   };
-  const forget = async s => {
-    if (!await confirmDlg('Forget snapshot', 'Remove snapshot ' + s.id.slice(0, 8) + ' (' + fmtTime(s.time) + ')? Run prune afterwards to free space.', true)) return;
-    try { await api('DELETE', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots/' + s.id); toast('Snapshot forgotten'); load(); }
-    catch (e) { toast(e.message, true); }
+  const forget = async list => {
+    const what = list.length === 1 ? 'snapshot ' + list[0].id.slice(0, 8) + ' (' + list[0].job + ', ' + fmtTime(list[0].time) + ')' : list.length + ' snapshots';
+    if (!await confirmDlg('Forget snapshot' + (list.length > 1 ? 's' : ''), 'Remove ' + what + '? Run prune afterwards to free space.', true)) return;
+    let done = 0;
+    for (const s of list) {
+      try { await api('DELETE', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/snapshots/' + s.id); done++; }
+      catch (e) { toast(s.id.slice(0, 8) + ': ' + e.message, true); }
+    }
+    if (done) toast(done === 1 ? 'Snapshot forgotten' : done + ' snapshots forgotten');
+    load();
   };
+  const forgetSelected = () => forget(snaps.filter(s => picked.has(s.id)));
   const diffSelected = async () => {
     const [a, b] = snaps.filter(s => picked.has(s.id)).sort((x, y) => new Date(x.time) - new Date(y.time));
     const changes = await api('GET', '/api/repos/' + encodeURIComponent(state.snapRepo) + '/diff?a=' + a.id + '&b=' + b.id);
@@ -1081,7 +1342,7 @@ views.containers = async main => {
             h('button', { class: 'primary', disabled: !!run, onclick: () => dockerBackup(j.job, p.name) }, 'Back up now'),
             h('button', { disabled: !!run || !p.snapshots, onclick: () => dockerRestore(j.job, p) }, 'Restore…'),
             h('span', { class: 'spacer' }),
-            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapFilter = unit; navigate('snapshots'); } }, 'Snapshots'),
+            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapHost = ''; state.snapFilter = unit; navigate('snapshots'); } }, 'Snapshots'),
             h('button', { class: 'small', disabled: !last, onclick: () => openExplorer({ repo: j.repository, snapshot: last.id, job: unit }) }, 'Browse'))));
       }
     }

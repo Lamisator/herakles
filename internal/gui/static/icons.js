@@ -57,6 +57,8 @@ const ICONS = {
   stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
   retention: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2M16 3h5v5"/><path d="m21 3-5 5"/>',
   sparkle: '<path d="M12 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/>',
+  systems: '<rect x="2" y="4" width="13" height="10" rx="1.5"/><path d="M6 18h5M8.5 14v4"/><rect x="17" y="3" width="5" height="18" rx="1"/><path d="M19.5 7h.01M19.5 10h.01" stroke-width="2.5"/>',
+  desktop: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
 };
 
@@ -70,9 +72,9 @@ function icon(name, cls) {
 
 // Pictograms are added automatically: navigation by view, page titles and
 // empty states by their page, buttons by their label.
-const NAV_ICONS = { dashboard: 'dashboard', containers: 'containers', snapshots: 'snapshots', jobs: 'jobs', repos: 'repos',
+const NAV_ICONS = { dashboard: 'dashboard', systems: 'systems', containers: 'containers', snapshots: 'snapshots', jobs: 'jobs', repos: 'repos',
   settings: 'settings', logs: 'logs', users: 'users', account: 'account', wizard: 'wizard' };
-const TITLE_ICONS = { 'Dashboard': 'dashboard', 'Containers': 'containers', 'Snapshots & Restore': 'snapshots', 'Backup Jobs': 'jobs',
+const TITLE_ICONS = { 'Dashboard': 'dashboard', 'Systems': 'systems', 'Containers': 'containers', 'Snapshots & Restore': 'snapshots', 'Backup Jobs': 'jobs',
   'Repositories': 'repos', 'Configuration': 'settings', 'Activity Log': 'logs', 'Users': 'users', 'Account': 'account', 'New backup': 'wizard' };
 const BUTTON_ICONS = [
   [/^Back up now$/, 'play'], [/^Full$/, 'full'], [/^Incremental$/, 'incremental'], [/^Differential$/, 'differential'],

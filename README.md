@@ -186,7 +186,8 @@ A full‑screen curses‑style interface with five tabs (keys `1`–`5` or `F1`�
 The GUI is served only on `127.0.0.1` and protected by a random session token, CSRF and DNS‑rebinding checks. It opens in a Chromium/Edge **app window** (no browser chrome) or falls back to the default browser. It needs no extra runtime on Linux or Windows and is fully embedded in the binary.
 
 * **Dashboard**: job cards with Back up now / Full / Incremental / Differential, live progress, daemon status and next run.
-* **Snapshots & Restore**: filter, compare two snapshots, forget; **Download** a whole snapshot as ZIP, tar.gz or tar; **Browse** opens the explorer.
+* **Systems**: one card per backed-up computer (from all repositories) with last backup, freshness dot, snapshot count, jobs and stored size; click it to see that system's snapshots.
+* **Snapshots & Restore**: summary (snapshots, jobs, latest backup, stored, read errors), filter by system and by type (full / incremental / differential), group by backup type, job, content, day or system, sort by any column; click a row for details (file counts, new data, parent, read errors, all paths). Compare two snapshots, forget one or several; **Download** a whole snapshot as ZIP, tar.gz or tar; **Browse** opens the explorer.
 * **Explorer** (from Snapshots, the dashboard and container cards): breadcrumbs, a version switcher for the same job, sortable columns, filter, name search below the current folder (`invoice`, `*.pdf`), preview of text files and images, multi-select across folders; download the selection (a single file as it is, anything else as ZIP, tar.gz or tar) or restore it. `Backspace` goes up, `Esc` closes.
 * **Backup Jobs**: full editor for sources, exclusions, schedules (with presets), retention, hooks and retries.
 * **Repositories**: add/edit (local, SMB, SFTP, server), encryption/password source, key file, bandwidth limits, maintenance schedules, initialize, check, prune, statistics.
