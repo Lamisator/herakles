@@ -1,0 +1,52 @@
+# Herakles on k-inf1: backups of the Docker services to the Hetzner Storage Box.
+# Managed by Claude; see https://herakles.kloeck-it.de/guide.html
+state_dir: /var/lib/herakles
+
+repositories:
+  - name: storagebox
+    location: smb://u491783@u491783.your-storagebox.de/backup/herakles/k-inf1
+    password_file: /etc/herakles/repo.pw     # repository encryption password
+    remote:
+      password: "<Storage Box password, see .storage_creds>"                            # Storage Box (SMB) login
+    compression: auto
+    connections: 4
+    maintenance:
+      prune_schedule: "30 5 * * 0"           # Sundays 05:30
+      repack_threshold: 0.2
+      check_schedule: "0 6 1 * *"            # 1st of the month 06:00
+      check_read_data: "5%"
+
+jobs:
+  - name: docker
+    description: Docker services (/srv), named volumes, Traefik/Let's Encrypt config
+    repository: storagebox
+    paths:
+      - /srv
+      - /var/lib/docker/volumes
+      - /etc/traefik
+      - /etc/letsencrypt
+    exclude_caches: true
+    one_file_system: true
+    full_interval: 7d
+    schedule:
+      - cron: "15 3 * * 0"                   # Sunday 03:15: full
+        type: full
+      - cron: "15 3 * * 1-6"                 # Mon-Sat 03:15: incremental
+        type: incremental
+    retention:
+      keep_daily: 7
+      keep_weekly: 5
+      keep_monthly: 12
+      keep_yearly: 2
+      keep_full: 2
+    hooks:
+      before: [/etc/herakles/dump-databases.sh]   # Postgres/MongoDB dumps -> /srv/backup-dumps
+      timeout: 30m
+    retry:
+      attempts: 2
+      delay: 20m
+    catch_up: true
+
+daemon:
+  max_concurrent_jobs: 1
+  log_file: /var/log/herakles.log
