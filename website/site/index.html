@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Herakles Backup – deduplicated, encrypted backups for Linux and Windows</title>
+<meta name="description" content="Herakles is a free backup system in a single binary: deduplicated, compressed, AES-256 encrypted backups of files and whole disks, with a CLI, terminal UI, desktop GUI, tray icon, scheduler and optional repository server.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="./"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 8 14v16c0 15 10 26 24 30 14-4 24-15 24-30V14z" fill="#d4a017"/><path d="M22 20v24M42 20v24M22 32h20" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>Herakles</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#interfaces">Interfaces</a>
+      <a href="guide.html">Guide</a>
+      <a class="cta" href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap grid">
+    <div>
+      <h1>Backups that <span>carry the weight</span>.</h1>
+      <p class="lead">Herakles backs up your files, folders and whole disks into deduplicated, compressed and AES‑256 encrypted repositories, on a USB disk, your NAS, an SFTP server or its own backup server. One small program, no dependencies, set up in minutes.</p>
+      <div class="buttons">
+        <a class="btn primary" id="hero-dl" href="#download">Download Herakles <small>@VERSION@</small></a>
+        <a class="btn ghost" href="guide.html">Read the guide</a>
+      </div>
+      <div class="meta">Linux (x86‑64, ARM64, ARMv7) · Windows (x64, ARM64) · macOS (experimental) · free of charge</div>
+    </div>
+    <img class="shot" src="img/dashboard.webp" width="1600" height="1000" alt="The Herakles desktop interface showing two backup jobs, their last results and next scheduled runs">
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <p class="eyebrow">Why Herakles</p>
+    <h2 class="title">Everything a backup needs, nothing it doesn't</h2>
+    <p class="intro">Herakles is a single static program. It contains the scheduler, the user interfaces and even the backup server, so there is nothing else to install, and it works the same on a laptop, a server and a NAS.</p>
+    <div class="features">
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>Encrypted end to end</h3><p>AES‑256‑GCM for all data and metadata. Unlock with a password, a key file, or both. Storage and backup server never see your data.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 17.5h7M17.5 14v7"/></svg></div><h3>Deduplicated and compressed</h3><p>Content‑defined chunking stores every piece of data once, across files, snapshots and computers. zstd compression on top.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg></div><h3>Full, incremental, differential</h3><p>Pick a type per schedule, for example full on Sunday and incremental on weekdays. Every snapshot is complete and restorable on its own.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/></svg></div><h3>Schedules and retention</h3><p>Cron schedules, catch‑up of missed runs, retries and rules like “keep 7 daily, 4 weekly, 12 monthly”. Configurable all the way.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div><h3>Files and whole disks</h3><p>Back up folders with permissions and metadata, or image entire disks and partitions and write them back for disaster recovery.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="1.5"/><rect x="2" y="14" width="20" height="7" rx="1.5"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div><h3>Store it anywhere</h3><p>Local disk, mounted NFS/CIFS share, Windows UNC path, SMB without mounting, SFTP, or the Herakles repository server.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Ransomware‑resistant server</h3><p>The optional backup server has users, per‑user repositories, quotas and an append‑only mode: clients can add backups but never delete them.</p></div>
+      <div class="feature"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><h3>Four ways to use it</h3><p>Command line, a full‑screen terminal UI, a desktop GUI and a tray icon, all in the same program and all editing the same YAML file.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="interfaces">
+  <div class="wrap">
+    <p class="eyebrow">See it</p>
+    <h2 class="title">Built for people who don't want to think about backups</h2>
+    <p class="intro">Set it up once with the desktop interface, then let it run quietly in the tray. When you need something back, browse any snapshot like a folder.</p>
+
+    <div class="split">
+      <div>
+        <h3>Browse and restore any snapshot</h3>
+        <p>Every backup appears as a complete snapshot. Open one, walk through its folders and restore a single file, a folder or everything, to the original place or somewhere else. You can also download files straight from the browser or compare two snapshots.</p>
+        <ul>
+          <li>Search for a file across all snapshots</li>
+          <li>Choose how to treat existing files</li>
+          <li>Optional verification after restoring</li>
+        </ul>
+      </div>
+      <div class="frame"><img src="img/snapshots.webp" width="1600" height="1000" loading="lazy" alt="Snapshot list with browse, restore and forget buttons, and a folder browser below"></div>
+    </div>
+
+    <div class="split rev">
+      <div>
+        <h3>Jobs, schedules and retention in one form</h3>
+        <p>Pick folders or disks, exclusions, when to run which kind of backup and how long to keep what. Presets cover the common cases. Behind the form is a plain YAML file you can also edit by hand.</p>
+      </div>
+      <div class="frame"><img src="img/job-editor.webp" width="1600" height="1000" loading="lazy" alt="Job editor with sources, exclusions and schedule sections"></div>
+    </div>
+
+    <div class="split">
+      <div>
+        <h3>Quietly in your tray</h3>
+        <p><code>herakles tray</code> runs the scheduler and the interface in the background and puts an icon in the system tray. A coloured dot tells you when a backup runs, when a repository needs its password or when something failed. One setting starts it every time you log in.</p>
+      </div>
+      <div class="tray-pair">
+        <div class="frame"><img src="img/tray-menu.webp" width="800" height="400" loading="lazy" alt="Tray icon menu with the next backup time, Open Herakles and Quit Herakles"></div>
+        <div class="frame"><img src="img/tray-busy.webp" width="800" height="400" loading="lazy" alt="Tray icon with a blue dot and the tooltip Backing up docs 57 %"></div>
+      </div>
+    </div>
+
+    <div class="split rev">
+      <div>
+        <h3>A command line that scripts well</h3>
+        <p>Everything the interfaces do is also a command: with <code>--help</code> and examples on every command, <code>--json</code> output and meaningful exit codes. Ideal for servers, cron and automation.</p>
+      </div>
+<pre><span class="c">$ herakles backup documents</span>
+job documents: incremental backup -> snapshot 39454397 (success)
+  files: 12 new, 3 changed, 1189 unmodified (1204 total, 2.10 GiB)
+  added: 41.30 MiB of new data, 12.80 MiB stored after compression; took 0:04
+
+<span class="c">$ herakles snapshots --job documents</span>
+ID        TIME                 JOB        TYPE         SIZE      ADDED
+2939cbe7  2026-11-09 02:00:04  documents  full         2.09 GiB  1.21 GiB
+6ec4a073  2026-11-10 02:00:03  documents  incremental  2.09 GiB  9.84 MiB
+39454397  2026-11-11 02:00:02  documents  incremental  2.10 GiB  12.80 MiB
+
+<span class="c">$ herakles restore latest:/home/alex/Documents --target ~/recovered --verify</span>
+restored 1180 files, 64 directories (1.62 GiB) from snapshot 39454397 to /home/alex/recovered
+verified 1180 files</pre>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <p class="eyebrow">Get going</p>
+    <h2 class="title">Your first backup in three steps</h2>
+    <p class="intro">The <a href="guide.html#quick-start">guide</a> walks through it in detail, including the command line way.</p>
+    <div class="steps">
+      <div class="step"><h3>Download and start</h3><p>Download the file for your system and start the desktop interface.</p><pre>herakles tray --open</pre></div>
+      <div class="step"><h3>Add a repository</h3><p>Under <em>Repositories</em>, choose where backups go (for example a USB disk or your NAS), pick a password and click <em>Initialize</em>.</p></div>
+      <div class="step"><h3>Create a job</h3><p>Under <em>Backup Jobs</em>, choose folders and a schedule preset. Click <em>Back up now</em>, and tick <em>Start in the tray when I log in</em>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="download">
+  <div class="wrap">
+    <p class="eyebrow">Download</p>
+    <h2 class="title">Herakles @VERSION@</h2>
+    <p class="intro">One file per platform. There is no installer: download it, make it executable and run it. The same file is the CLI, the interfaces, the background service and the backup server.</p>
+    <div class="table-scroll">
+    <table class="dl-table" id="dl-table">
+      <tr><th>System</th><th>File</th><th>Size</th><th class="sum">SHA‑256</th></tr>
+      <tr data-os="linux-amd64"><td>Linux, x86‑64 <span class="muted">(PCs, servers, most NAS)</span></td><td><a class="file" href="downloads/herakles-linux-amd64" download>herakles-linux-amd64</a></td><td>@SIZE_herakles-linux-amd64@</td><td class="sum">@SHA_herakles-linux-amd64@</td></tr>
+      <tr data-os="linux-arm64"><td>Linux, ARM64 <span class="muted">(Raspberry Pi 4/5, ARM NAS)</span></td><td><a class="file" href="downloads/herakles-linux-arm64" download>herakles-linux-arm64</a></td><td>@SIZE_herakles-linux-arm64@</td><td class="sum">@SHA_herakles-linux-arm64@</td></tr>
+      <tr data-os="linux-armv7"><td>Linux, ARMv7 32‑bit <span class="muted">(older Pi and NAS)</span></td><td><a class="file" href="downloads/herakles-linux-armv7" download>herakles-linux-armv7</a></td><td>@SIZE_herakles-linux-armv7@</td><td class="sum">@SHA_herakles-linux-armv7@</td></tr>
+      <tr data-os="windows-amd64"><td>Windows, x64</td><td><a class="file" href="downloads/herakles-windows-amd64.exe" download>herakles-windows-amd64.exe</a></td><td>@SIZE_herakles-windows-amd64.exe@</td><td class="sum">@SHA_herakles-windows-amd64.exe@</td></tr>
+      <tr data-os="windows-arm64"><td>Windows, ARM64</td><td><a class="file" href="downloads/herakles-windows-arm64.exe" download>herakles-windows-arm64.exe</a></td><td>@SIZE_herakles-windows-arm64.exe@</td><td class="sum">@SHA_herakles-windows-arm64.exe@</td></tr>
+      <tr data-os="macos-arm64"><td>macOS, Apple Silicon <span class="muted">(experimental, no tray icon)</span></td><td><a class="file" href="downloads/herakles-macos-arm64" download>herakles-macos-arm64</a></td><td>@SIZE_herakles-macos-arm64@</td><td class="sum">@SHA_herakles-macos-arm64@</td></tr>
+    </table>
+    </div>
+    <p style="margin-top:12px;font-size:14.5px;color:var(--muted)">All checksums: <a href="downloads/SHA256SUMS">SHA256SUMS</a> · versioned files: <a href="downloads/@VERSION@/">downloads/@VERSION@/</a></p>
+
+    <div class="os-tabs" role="tablist">
+      <button role="tab" data-tab="linux" aria-selected="true">Install on Linux</button>
+      <button role="tab" data-tab="windows" aria-selected="false">Install on Windows</button>
+      <button role="tab" data-tab="macos" aria-selected="false">Install on macOS</button>
+    </div>
+    <div class="os-panel" data-panel="linux">
+<pre><span class="c"># download (pick the file for your CPU), check it, install it</span>
+curl -LO https://herakles.kloeck-it.de/downloads/herakles-linux-amd64
+curl -LO https://herakles.kloeck-it.de/downloads/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+sudo install -m 755 herakles-linux-amd64 /usr/local/bin/herakles
+
+<span class="c"># start the desktop interface in the tray, or use: herakles tui</span>
+herakles tray --open</pre>
+    </div>
+    <div class="os-panel" data-panel="windows" hidden>
+<pre><span class="c"># PowerShell: download, check, put it somewhere permanent</span>
+mkdir $env:LOCALAPPDATA\Herakles -Force
+cd $env:LOCALAPPDATA\Herakles
+Invoke-WebRequest https://herakles.kloeck-it.de/downloads/herakles-windows-amd64.exe -OutFile herakles.exe
+(Get-FileHash herakles.exe).Hash   <span class="c"># compare with SHA256SUMS</span>
+
+.\herakles.exe tray --open</pre>
+      <p style="color:var(--muted)">Windows SmartScreen may warn about an unknown publisher the first time, because the file is not code-signed. Choose <em>More info → Run anyway</em>.</p>
+    </div>
+    <div class="os-panel" data-panel="macos" hidden>
+<pre>curl -LO https://herakles.kloeck-it.de/downloads/herakles-macos-arm64
+chmod +x herakles-macos-arm64
+xattr -d com.apple.quarantine herakles-macos-arm64   <span class="c"># allow the unsigned file</span>
+sudo mv herakles-macos-arm64 /usr/local/bin/herakles
+herakles gui</pre>
+      <p style="color:var(--muted)">The macOS build is experimental and has not been tested on a Mac yet. CLI, terminal UI and GUI are expected to work. The tray icon is not available.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Herakles @VERSION@ · © 2026 Marius Klöck</div>
+    <div><a href="guide.html">Guide</a> · <a href="guide.html#faq">FAQ</a> · <a href="guide.html#troubleshooting">Troubleshooting</a> · <a href="downloads/SHA256SUMS">Checksums</a></div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // Highlight the download that fits this browser's system.
+  const ua = navigator.userAgent, pf = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  let os = null;
+  if (/Win/i.test(pf) || /Windows/i.test(ua)) os = /ARM|aarch64/i.test(ua) ? 'windows-arm64' : 'windows-amd64';
+  else if (/Mac/i.test(pf) || /Mac OS X/i.test(ua)) os = 'macos-arm64';
+  else if (/Linux|X11/i.test(pf + ua) && !/Android/i.test(ua)) os = /aarch64|arm64/i.test(pf + ua) ? 'linux-arm64' : /armv7|armv8l/i.test(pf + ua) ? 'linux-armv7' : 'linux-amd64';
+  const row = os && document.querySelector('tr[data-os="' + os + '"]');
+  if (row) {
+    row.classList.add('recommended');
+    row.cells[0].insertAdjacentHTML('beforeend', ' <span class="tag">your system</span>');
+    const a = row.querySelector('a.file');
+    const hero = document.getElementById('hero-dl');
+    hero.href = a.getAttribute('href');
+    hero.setAttribute('download', '');
+    hero.firstChild.nodeValue = 'Download for ' + row.cells[0].firstChild.nodeValue.trim().replace(/,.*/, '') + ' ';
+  }
+  const tabs = document.querySelectorAll('.os-tabs button');
+  const select = name => {
+    tabs.forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    document.querySelectorAll('.os-panel').forEach(p => { p.hidden = p.dataset.panel !== name; });
+  };
+  tabs.forEach(b => b.addEventListener('click', () => select(b.dataset.tab)));
+  if (os) select(os.split('-')[0]);
+})();
+</script>
+</body>
+</html>

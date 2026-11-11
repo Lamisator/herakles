@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Herakles Guide – install, configure, back up and restore</title>
+<meta name="description" content="The complete Herakles guide: installation, first backup, repositories, jobs, schedules, retention, encryption, background operation, restoring, disk images, the repository server and troubleshooting.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="./"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 8 14v16c0 15 10 26 24 30 14-4 24-15 24-30V14z" fill="#d4a017"/><path d="M22 20v24M42 20v24M22 32h20" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>Herakles</a>
+    <nav>
+      <a href="./#features">Features</a>
+      <a href="guide.html" class="active">Guide</a>
+      <a class="cta" href="./#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap guide">
+<aside class="toc" id="toc">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#install">Installation</a></li>
+    <li><a href="#quick-start">Quick start</a>
+      <ol><li><a href="#qs-gui">With the desktop interface</a></li><li><a href="#qs-cli">With the command line</a></li><li><a href="#qs-adhoc">Without a configuration</a></li></ol></li>
+    <li><a href="#concepts">Concepts</a></li>
+    <li><a href="#repositories">Repositories</a>
+      <ol><li><a href="#locations">Storage locations</a></li><li><a href="#passwords">Passwords and key files</a></li><li><a href="#repo-options">Repository options</a></li></ol></li>
+    <li><a href="#jobs">Backup jobs</a>
+      <ol><li><a href="#sources">Sources</a></li><li><a href="#excludes">Exclusions</a></li></ol></li>
+    <li><a href="#types">Backup types</a></li>
+    <li><a href="#schedules">Schedules</a></li>
+    <li><a href="#retention">Retention</a></li>
+    <li><a href="#background">Running in the background</a>
+      <ol><li><a href="#tray">Tray icon</a></li><li><a href="#service">System service</a></li><li><a href="#daemon-control">Controlling the daemon</a></li></ol></li>
+    <li><a href="#restore">Finding and restoring</a></li>
+    <li><a href="#disks">Disks and partitions</a></li>
+    <li><a href="#server">Repository server</a>
+      <ol><li><a href="#server-setup">Setting it up</a></li><li><a href="#server-clients">Connecting clients</a></li><li><a href="#nas">On a NAS (QNAP, Synology)</a></li><li><a href="#server-vs-share">Server or network share?</a></li></ol></li>
+    <li><a href="#replication">Copies and the 3‑2‑1 rule</a></li>
+    <li><a href="#hooks">Hooks and notifications</a></li>
+    <li><a href="#maintenance">Maintenance</a></li>
+    <li><a href="#interfaces">Interfaces</a></li>
+    <li><a href="#config">Configuration reference</a></li>
+    <li><a href="#security">Security</a></li>
+    <li><a href="#troubleshooting">Troubleshooting</a></li>
+    <li><a href="#faq">FAQ</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ol>
+</aside>
+
+<article class="doc">
+<h1>The Herakles guide</h1>
+<p class="lead">Everything from the first download to restoring a whole disk. This guide is for Herakles @VERSION@. Every command also has <code>--help</code> with examples.</p>
+
+<h2 id="overview">Overview</h2>
+<p>Herakles copies your files, folders, disks or partitions into a <strong>repository</strong>: a folder on a disk, a network share, an SFTP server or a Herakles repository server. Inside the repository everything is split into chunks, deduplicated, compressed and encrypted. Each backup run creates a <strong>snapshot</strong>, a complete picture of the backed-up data at that moment, from which you can restore any file.</p>
+<p>All of Herakles is one program file. Depending on how you start it, it is:</p>
+<table>
+<tr><th>Command</th><th>What it is</th></tr>
+<tr><td><code>herakles &lt;command&gt;</code></td><td>The command line interface (CLI): <code>backup</code>, <code>restore</code>, <code>snapshots</code> and so on.</td></tr>
+<tr><td><code>herakles gui</code></td><td>The desktop interface. It runs locally and opens in an app window or your browser.</td></tr>
+<tr><td><code>herakles tray</code></td><td>Scheduled backups plus the desktop interface plus a tray icon. The easiest way to use Herakles on a desktop.</td></tr>
+<tr><td><code>herakles tui</code></td><td>A full-screen terminal interface, for servers and SSH sessions.</td></tr>
+<tr><td><code>herakles daemon</code></td><td>The background service that runs scheduled backups, installable as a systemd or Windows service.</td></tr>
+<tr><td><code>herakles server</code></td><td>The optional repository server that stores backups of other computers.</td></tr>
+</table>
+<p>All of them read and write the same <a href="#config">YAML configuration file</a>.</p>
+
+<h2 id="install">Installation</h2>
+<p>Download the file for your system from the <a href="./#download">download section</a>. There is no installer and nothing else to install.</p>
+<h3>Linux</h3>
+<pre>curl -LO https://herakles.kloeck-it.de/downloads/herakles-linux-amd64   <span class="c"># or -arm64 / -armv7</span>
+curl -LO https://herakles.kloeck-it.de/downloads/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+sudo install -m 755 herakles-linux-amd64 /usr/local/bin/herakles
+herakles version</pre>
+<p>Not sure which file? Run <code>uname -m</code>: <code>x86_64</code> means amd64, <code>aarch64</code> means arm64, <code>armv7l</code> means armv7.</p>
+<h3>Windows</h3>
+<p>Download <code>herakles-windows-amd64.exe</code> (or <code>-arm64</code>), rename it to <code>herakles.exe</code> and move it to a permanent folder such as <code>C:\Program Files\Herakles</code>. If you plan to install the Windows service, the file must stay where it is. To call it from any terminal, add the folder to your <code>PATH</code>.</p>
+<pre>(Get-FileHash .\herakles.exe).Hash      <span class="c"># compare with SHA256SUMS</span>
+.\herakles.exe version</pre>
+<p>SmartScreen may warn about an unknown publisher because the file is not code-signed: choose <em>More info → Run anyway</em>.</p>
+<h3>macOS (experimental)</h3>
+<p>The Apple Silicon build has not been tested on a Mac yet. CLI, terminal UI and GUI are expected to work; the tray icon is not available. Remove the download quarantine with <code>xattr -d com.apple.quarantine herakles-macos-arm64</code>.</p>
+<h3>Updating and removing</h3>
+<p>To update, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
+
+<h2 id="quick-start">Quick start</h2>
+<h3 id="qs-gui">With the desktop interface</h3>
+<ol>
+  <li>Start Herakles in the tray and open its window:
+<pre>herakles tray --open</pre>
+  On a computer without a system tray, use <code>herakles gui</code> instead.</li>
+  <li>Open <strong>Repositories → Add repository</strong>. Give it a name (for example <code>usb-disk</code>), a location such as <code>/media/alex/Backup/herakles</code>, <code>D:\Backups\herakles</code> or <code>\\nas\backup\herakles</code>, and choose how it is unlocked. A <em>password file</em> lets backups run unattended; with <em>ask</em>, Herakles asks for the password in the interface. Save, then click <strong>Initialize</strong>.</li>
+  <li>Open <strong>Backup Jobs → New job</strong>. Pick the repository, enter the folders to back up, add exclusions if you like and choose a schedule from <em>Presets</em> (for example “Daily, full on Sunday”). Set the retention, for example 7 daily, 4 weekly, 12 monthly.</li>
+  <li>On the <strong>Dashboard</strong>, click <strong>Back up now</strong>. The first backup reads everything; later ones only read what changed.</li>
+  <li>Under <strong>Configuration</strong>, tick <strong>Start Herakles in the system tray when I log in</strong>. From now on, backups run on schedule whenever you are logged in.</li>
+</ol>
+<figure class="frame"><img src="img/dashboard.webp" width="1600" height="1000" loading="lazy" alt="Dashboard with two jobs"></figure>
+
+<h3 id="qs-cli">With the command line</h3>
+<pre><span class="c"># 1. Store the repository password in a file only you can read</span>
+mkdir -p ~/.config/herakles
+read -rs PW &amp;&amp; printf '%s\n' "$PW" &gt; ~/.config/herakles/password &amp;&amp; chmod 600 ~/.config/herakles/password
+
+<span class="c"># 2. Define a repository and a job</span>
+herakles config set repo usb-disk /media/alex/Backup/herakles \
+    --password-file-path ~/.config/herakles/password
+herakles config set job home --repository usb-disk --path ~ \
+    --exclude '**/.cache' --exclude '**/node_modules' \
+    --schedule '0 2 * * 0=full' --schedule '0 2 * * 1-6=incremental' \
+    --yaml 'retention: {keep_daily: 7, keep_weekly: 4, keep_monthly: 12}'
+
+<span class="c"># 3. Create the repository and run the first backup</span>
+herakles init --repo usb-disk
+herakles backup home
+
+<span class="c"># 4. Look at the result</span>
+herakles snapshots
+herakles ls latest ~/Documents
+
+<span class="c"># 5. Run the schedules in the background (pick one)</span>
+herakles tray autostart on                       <span class="c"># desktop: tray icon at login</span>
+sudo herakles daemon install &amp;&amp; sudo herakles daemon start   <span class="c"># server: system service</span></pre>
+<p>Instead of <code>config set</code> you can write the file yourself: <code>herakles config init</code> writes a fully commented example, and <code>herakles config edit</code> opens it in your editor and validates it when you save.</p>
+<div class="note warn"><p><strong>Keep your password safe, and somewhere else too.</strong> Without the password (or key file), nobody, including you, can read the backups. Store a copy in a password manager or on paper.</p></div>
+
+<h3 id="qs-adhoc">Without a configuration</h3>
+<p>For a one-off backup you don't need a configuration file at all:</p>
+<pre>herakles init   --repo /mnt/usb/backup
+herakles backup --repo /mnt/usb/backup --path ~/Projects --path ~/Documents
+herakles snapshots --repo /mnt/usb/backup</pre>
+
+<h2 id="concepts">Concepts</h2>
+<dl>
+  <dt><strong>Repository</strong></dt><dd>Where backups are stored. One repository can hold backups of many jobs and many computers; identical data is stored only once across all of them.</dd>
+  <dt><strong>Job</strong></dt><dd>What to back up (folders and/or disks), into which repository, when, and how long to keep it.</dd>
+  <dt><strong>Snapshot</strong></dt><dd>The result of one backup run: a complete, read-only view of the job's data at that time, identified by a short ID such as <code>2939cbe7</code>. <code>latest</code> means the newest one.</dd>
+  <dt><strong>Backup type</strong></dt><dd>How much work a run does to find changes: <code>full</code>, <code>incremental</code>, <code>differential</code> or <code>auto</code>. See <a href="#types">backup types</a>.</dd>
+  <dt><strong>Retention</strong></dt><dd>Rules that decide which old snapshots are kept. Removing a snapshot is called <em>forget</em>; freeing the space it used is called <em>prune</em>.</dd>
+  <dt><strong>Daemon</strong></dt><dd>The background process that runs jobs on their schedules: the tray or the system service.</dd>
+</dl>
+<p>Because data is deduplicated, a snapshot only adds the chunks that are new. A daily backup of 500 GB where 2 GB changed adds about 2 GB, and every snapshot is still complete. Deleting any snapshot never breaks another one, unlike tape-style incremental chains.</p>
+
+<h2 id="repositories">Repositories</h2>
+<p>A repository is created once with <code>herakles init</code> (or <strong>Initialize</strong> in the GUI). It is defined in the configuration like this:</p>
+<pre>repositories:
+  - name: usb-disk
+    location: /media/alex/Backup/herakles
+    password_file: ~/.config/herakles/password</pre>
+
+<h3 id="locations">Storage locations</h3>
+<div class="table-scroll"><table>
+<tr><th>Where</th><th>Location</th><th>Notes</th></tr>
+<tr><td>Local disk, USB disk</td><td><code>/mnt/backup/herakles</code><br><code>D:\Backups\herakles</code></td><td>The folder is created by <code>init</code>.</td></tr>
+<tr><td>Mounted NFS or CIFS share</td><td><code>/mnt/nas/herakles</code></td><td>Mount the share as usual; Herakles sees a normal folder.</td></tr>
+<tr><td>Windows share (UNC)</td><td><code>\\nas\backup\herakles</code></td><td>Uses the Windows login. For the Windows service, the service account needs access.</td></tr>
+<tr><td>SMB/CIFS without mounting</td><td><code>smb://WORKGROUP;backup@nas.local/backups/herakles</code></td><td><code>smb://[DOMAIN;]user@host/share/path</code>. Set the share password in <code>remote.password_env</code> or <code>remote.password</code>.</td></tr>
+<tr><td>SFTP</td><td><code>sftp://backup@host.example.com/srv/herakles</code></td><td>Uses ssh-agent, <code>~/.ssh</code> keys and <code>known_hosts</code>, or <code>remote.identity_file</code> / <code>remote.known_hosts</code>.</td></tr>
+<tr><td>Herakles server</td><td><code>herakles://backup.example.com:8443/alex-laptop</code></td><td>HTTPS; <code>herakles+http://</code> for plain HTTP on a trusted network. See <a href="#server">repository server</a>.</td></tr>
+</table></div>
+<p>Examples with the remote settings:</p>
+<pre>repositories:
+  - name: nas
+    location: smb://WORKGROUP;backup@nas.local/backups/herakles
+    password_file: ~/.config/herakles/password      <span class="c"># repository password</span>
+    remote:
+      password_env: NAS_PASSWORD                    <span class="c"># SMB account password</span>
+
+  - name: offsite
+    location: sftp://backup@vps.example.com/srv/herakles
+    password_file: ~/.config/herakles/password
+    remote:
+      identity_file: ~/.ssh/id_ed25519</pre>
+
+<h3 id="passwords">Passwords and key files</h3>
+<p>A repository is unlocked with a <strong>password</strong>, a <strong>key file</strong>, or <strong>both</strong> (then you need both). Herakles looks for the password in this order:</p>
+<ol>
+  <li><code>password</code>: written directly in the configuration (discouraged);</li>
+  <li><code>password_file</code>: the first line of a file (protect it with <code>chmod 600</code>);</li>
+  <li><code>password_env</code>: an environment variable;</li>
+  <li><code>password_command</code>: the output of a command, for example <code>pass show backup/herakles</code> or a secret manager;</li>
+  <li>the <code>HERAKLES_PASSWORD</code> environment variable;</li>
+  <li>otherwise the CLI, TUI and GUI ask you. The system service cannot ask, so it needs one of the sources above. The tray can ask: the repository shows as locked until you enter the password in the window.</li>
+</ol>
+<p>Key files are random 256-bit keys:</p>
+<pre>herakles key generate ~/.config/herakles/repo.key
+herakles init --repo usb-disk --key-file ~/.config/herakles/repo.key        <span class="c"># password + key file</span>
+herakles init --repo /mnt/usb --generate-key-file ~/.herakles.key          <span class="c"># create and use one</span></pre>
+<p>In the configuration, set <code>key_file:</code> on the repository. A repository can have several keys, for example your own password plus an emergency key file kept in a safe:</p>
+<pre>herakles key list   --repo usb-disk
+herakles key add    --repo usb-disk --label "emergency" --new-key-file /media/safe/emergency.key --no-password
+herakles key passwd --repo usb-disk                 <span class="c"># change the password of the key you use</span>
+herakles key remove --repo usb-disk &lt;KEY-ID&gt;</pre>
+<div class="note warn"><p>If all passwords and key files of a repository are lost, the data cannot be recovered. There is no back door.</p></div>
+
+<h3 id="repo-options">Repository options</h3>
+<table>
+<tr><th>Option</th><th>Meaning</th></tr>
+<tr><td><code>compression</code></td><td><code>auto</code> (default: zstd, skipping incompressible data), <code>none</code>, <code>zstd</code>, <code>zstd:1</code>…<code>zstd:4</code> (faster…smaller), or <code>auto,zstd:3</code>.</td></tr>
+<tr><td><code>pack_size_mib</code></td><td>Size of the pack files data is stored in (default 16). Larger packs mean fewer files on the storage.</td></tr>
+<tr><td><code>connections</code></td><td>Parallel connections to remote storage.</td></tr>
+<tr><td><code>upload_limit_kib</code>, <code>download_limit_kib</code></td><td>Bandwidth limits in KiB/s, for example <code>5120</code> for 5 MiB/s.</td></tr>
+<tr><td><code>maintenance.prune_schedule</code></td><td>Cron schedule for freeing unused space (see <a href="#maintenance">maintenance</a>).</td></tr>
+<tr><td><code>maintenance.check_schedule</code>, <code>check_read_data</code></td><td>Cron schedule for integrity checks, optionally downloading a share of the data such as <code>10%</code>.</td></tr>
+<tr><td><code>chunker</code></td><td><code>min_kib</code>, <code>avg_kib</code>, <code>max_kib</code>: chunk sizes, fixed when the repository is created. The defaults suit almost everyone.</td></tr>
+</table>
+
+<h2 id="jobs">Backup jobs</h2>
+<pre>jobs:
+  - name: home
+    description: Home directory
+    repository: usb-disk
+    paths: [/home/alex]
+    exclude: ["**/.cache", "**/node_modules", "*.tmp", /home/alex/Downloads]
+    exclude_caches: true
+    full_interval: 7d
+    schedule:
+      - { cron: "0 2 * * 0",   type: full }
+      - { cron: "0 2 * * 1-6", type: incremental }
+    retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 12 }</pre>
+<h3 id="sources">Sources</h3>
+<ul>
+  <li><code>paths</code>: files and folders. Herakles stores permissions, owner, timestamps, symlinks, FIFOs, device nodes and, on Linux, extended attributes.</li>
+  <li><code>devices</code>: whole disks or partitions as raw images, for example <code>/dev/sda1</code>, <code>/dev/nvme0n1</code>, <code>\\.\C:</code> or <code>\\.\PhysicalDrive0</code>. See <a href="#disks">disks and partitions</a>.</li>
+  <li><code>tags</code>: labels added to every snapshot of the job, useful for filtering and for <code>keep_tags</code>.</li>
+</ul>
+<p>Backing up system folders or other users' files needs root (Linux) or administrator rights (Windows); use the system service for that.</p>
+<h3 id="excludes">Exclusions</h3>
+<table>
+<tr><th>Option</th><th>Example</th><th>Effect</th></tr>
+<tr><td><code>exclude</code></td><td><code>*.tmp</code></td><td>Any file or folder named like this, anywhere.</td></tr>
+<tr><td></td><td><code>**/node_modules</code></td><td>Folders of this name at any depth.</td></tr>
+<tr><td></td><td><code>/home/*/Downloads</code></td><td>An absolute path (with wildcards).</td></tr>
+<tr><td><code>exclude_if_present</code></td><td><code>[.nobackup]</code></td><td>Skip folders that contain a file with this name.</td></tr>
+<tr><td><code>exclude_caches</code></td><td><code>true</code></td><td>Skip folders marked with a <code>CACHEDIR.TAG</code> file (browsers and build tools set these).</td></tr>
+<tr><td><code>exclude_larger_than</code></td><td><code>20G</code></td><td>Skip files bigger than this.</td></tr>
+<tr><td><code>one_file_system</code></td><td><code>true</code></td><td>Don't descend into other mounted file systems.</td></tr>
+</table>
+
+<h2 id="types">Backup types</h2>
+<p>The type decides how Herakles finds what changed. Thanks to deduplication, all types store unchanged data only once, and <strong>every snapshot is complete and can be restored on its own</strong>.</p>
+<table>
+<tr><th>Type</th><th>What it reads</th><th>Use it for</th></tr>
+<tr><td><code>full</code></td><td>Every byte of every file, without relying on earlier snapshots. Also catches changes that didn't update the file's modification time.</td><td>A weekly or monthly run that verifies everything.</td></tr>
+<tr><td><code>incremental</code></td><td>Only files whose size, modification time, change time or inode differ from the latest snapshot of the job.</td><td>Fast daily or hourly runs.</td></tr>
+<tr><td><code>differential</code></td><td>Like incremental, but compared with the latest <em>full</em> snapshot.</td><td>When you prefer comparing with a fixed baseline.</td></tr>
+<tr><td><code>auto</code> (default)</td><td>Incremental, but full when the last full backup is older than the job's <code>full_interval</code> (for example <code>7d</code>). The very first backup is always full.</td><td>A single schedule that takes care of itself.</td></tr>
+</table>
+<p>Run a specific type by hand with <code>herakles backup home --type full</code>, or with the Full / Incremental / Differential buttons in the GUI.</p>
+
+<h2 id="schedules">Schedules</h2>
+<p>Each job can have several schedules, each with its own backup type. Schedules use the standard five cron fields, in the computer's local time:</p>
+<pre>┌───────── minute (0–59)
+│ ┌─────── hour (0–23)
+│ │ ┌───── day of month (1–31)
+│ │ │ ┌─── month (1–12)
+│ │ │ │ ┌─ day of week (0–6, Sunday = 0)
+│ │ │ │ │
+0 2 * * 0      Sunday 02:00
+0 2 * * 1-6    Monday–Saturday 02:00
+0 */4 * * *    every 4 hours
+30 12 1 * *    12:30 on the 1st of every month</pre>
+<p>Shortcuts work too: <code>@daily</code>, <code>@weekly</code>, <code>@monthly</code>, <code>@hourly</code> and <code>@every 6h</code>.</p>
+<pre>schedule:
+  - { cron: "0 2 * * 0",   type: full }          <span class="c"># weekly full</span>
+  - { cron: "0 2 * * 1-6", type: incremental }   <span class="c"># daily incremental</span>
+  - { cron: "0 */4 * * *", type: auto }          <span class="c"># every 4 hours, full when due</span>
+catch_up: true      <span class="c"># run a missed schedule when the daemon starts (laptop was off)</span>
+retry:
+  attempts: 2       <span class="c"># retry failed runs</span>
+  delay: 10m</pre>
+<p>On the command line: <code>--schedule '0 2 * * 0=full'</code>. In the GUI, the job editor has presets. Schedules only run while the tray or the service is running; <code>herakles jobs</code> shows each job's schedules and last result.</p>
+<p>Two daemon settings affect all jobs: <code>daemon.max_concurrent_jobs</code> (default 1, so jobs queue up) and <code>daemon.log_file</code>.</p>
+
+<h2 id="retention">Retention</h2>
+<p>After every backup, the job's <code>retention</code> rules decide which of its snapshots to keep. A snapshot is kept if <strong>any</strong> rule keeps it. Without rules, everything is kept.</p>
+<table>
+<tr><th>Rule</th><th>Keeps</th></tr>
+<tr><td><code>keep_last: N</code></td><td>the N newest snapshots</td></tr>
+<tr><td><code>keep_hourly</code>, <code>keep_daily</code>, <code>keep_weekly</code>, <code>keep_monthly</code>, <code>keep_yearly: N</code></td><td>the newest snapshot of each of the last N hours, days, weeks, months, years that have one</td></tr>
+<tr><td><code>keep_full: N</code></td><td>the N newest full backups</td></tr>
+<tr><td><code>keep_within: 14d</code></td><td>everything from the last 14 days</td></tr>
+<tr><td><code>keep_within_daily: 1m</code> (and <code>_hourly</code>, <code>_weekly</code>, <code>_monthly</code>, <code>_yearly</code>)</td><td>one per day for the last month, and so on</td></tr>
+<tr><td><code>keep_tags: [important]</code></td><td>every snapshot with one of these tags</td></tr>
+<tr><td><code>group_by: job,host</code></td><td>how snapshots are grouped before the rules apply (default <code>job,host</code>; also <code>paths</code>, <code>tags</code>)</td></tr>
+</table>
+<p>Durations use <code>y</code>, <code>m</code>, <code>w</code>, <code>d</code>, <code>h</code>, for example <code>1y6m</code> or <code>14d</code>. They are measured from the <strong>newest snapshot</strong>, not from today, so if backups stop working for a while, retention never deletes your last good backups.</p>
+<p>A classic plan: “weekly full, daily incremental, keep a week of dailies, a month of weeklies and a year of monthlies”:</p>
+<pre>schedule:
+  - { cron: "0 2 * * 0",   type: full }
+  - { cron: "0 2 * * 1-6", type: incremental }
+retention:
+  keep_daily: 7
+  keep_weekly: 4
+  keep_monthly: 12
+  keep_full: 2</pre>
+<p>Forgetting a snapshot removes it from the list, but its data stays until a <strong>prune</strong> frees the space. Set <code>prune: true</code> on the job to prune right after each backup, or schedule it per repository with <code>maintenance.prune_schedule</code> (better for large repositories). To try rules before using them:</p>
+<pre>herakles forget --job home --dry-run
+herakles forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --dry-run</pre>
+
+<h2 id="background">Running in the background</h2>
+<p>Schedules need a running daemon. There are two ways to run it. Use one or the other, not both, because they share the control port.</p>
+<table>
+<tr><th></th><th>Tray (<code>herakles tray</code>)</th><th>System service (<code>herakles daemon</code>)</th></tr>
+<tr><td>Starts</td><td>when you log in</td><td>when the computer boots</td></tr>
+<tr><td>Runs as</td><td>you</td><td>root / LocalSystem (or your user with <code>--user</code>)</td></tr>
+<tr><td>Passwords</td><td>can ask in the window</td><td>needs a stored password source</td></tr>
+<tr><td>Interface</td><td>tray icon and desktop window included</td><td>use <code>herakles gui</code>, <code>tui</code> or <code>daemon status</code></td></tr>
+<tr><td>Best for</td><td>laptops and desktops</td><td>servers and system-wide backups</td></tr>
+</table>
+
+<h3 id="tray">Tray icon</h3>
+<pre>herakles tray                  <span class="c"># run now; --open also opens the window</span>
+herakles tray autostart on     <span class="c"># start at every login (off / no argument = show)</span></pre>
+<p>The icon's menu shows the status (next backup, progress, problems) and offers <strong>Open Herakles</strong> and <strong>Quit Herakles</strong>; a left click opens the window too. A dot on the icon shows the state: <strong>blue</strong> while a backup runs, <strong>amber</strong> when a repository needs its password, <strong>red</strong> when the last backup of a job failed.</p>
+<figure class="tray-pair"><div class="frame"><img src="img/tray-menu.webp" loading="lazy" alt="Tray menu"></div><div class="frame"><img src="img/tray-busy.webp" loading="lazy" alt="Tray icon during a backup"></div></figure>
+<p>Autostart is the <code>tray.autostart</code> option in the configuration; the checkbox under <em>Configuration → Desktop</em> in the GUI sets it as well. On Linux it adds an autostart entry and a <em>Herakles Backup</em> launcher to your applications menu; on Windows it uses the <code>Run</code> registry key of your account. Starting Herakles a second time just opens the window of the running one.</p>
+<ul>
+  <li><strong>Linux desktops:</strong> KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar and others show the icon directly. <strong>GNOME</strong> needs the <em>AppIndicator and KStatusNotifierItem Support</em> extension.</li>
+  <li><strong>Windows:</strong> the console window closes by itself when the tray starts at login or from Explorer.</li>
+  <li>If there is no desktop at all, <code>herakles tray</code> keeps running as daemon plus GUI and prints the address of the window.</li>
+</ul>
+
+<h3 id="service">System service</h3>
+<h4>Linux (systemd)</h4>
+<pre>sudo herakles daemon install       <span class="c"># system service, uses /etc/herakles/herakles.yaml</span>
+sudo herakles daemon start
+herakles daemon status
+
+herakles daemon install --user     <span class="c"># or a per-user service (systemd --user)</span>
+herakles daemon start --user
+loginctl enable-linger $USER       <span class="c"># keep user services running without a login</span></pre>
+<p>As root, the configuration is <code>/etc/herakles/herakles.yaml</code> and state goes to <code>/var/lib/herakles</code>. The service is registered with the configuration file you used when installing it (<code>--config</code> works too). Logs: <code>herakles daemon logs</code> or <code>journalctl -u herakles</code>.</p>
+<h4>Windows service</h4>
+<p>Open a terminal <strong>as administrator</strong>, put the configuration in <code>%ProgramData%\Herakles\herakles.yaml</code> (Herakles prefers this file when it exists) and run:</p>
+<pre>herakles daemon install
+herakles daemon start
+herakles daemon status</pre>
+<p>The service runs as LocalSystem. Network shares must therefore be reachable without your personal login: use <code>smb://</code> with credentials in the configuration rather than a mapped drive letter.</p>
+
+<h3 id="daemon-control">Controlling the daemon</h3>
+<pre>herakles daemon status                       <span class="c"># schedule, running tasks, last results</span>
+herakles daemon trigger home --type full --wait
+herakles daemon trigger usb-disk --kind prune     <span class="c"># or --kind check</span>
+herakles daemon cancel &lt;TASK-ID&gt;
+herakles daemon reload                       <span class="c"># after editing the YAML (or send SIGHUP)</span>
+herakles daemon logs
+herakles daemon stop | restart | service-status | uninstall</pre>
+<p>These commands talk to whichever daemon is running, tray or service, over a local control API (<code>127.0.0.1:7477</code> by default, <code>daemon.control_listen</code>) protected by a random token. The GUI and TUI reload the daemon automatically after saving.</p>
+
+<h2 id="restore">Finding and restoring</h2>
+<h3>In the desktop interface</h3>
+<p>Under <strong>Snapshots &amp; Restore</strong>, pick a repository, click <strong>Browse</strong> on a snapshot and walk through its folders. <strong>Restore…</strong> restores a file or folder (choose the target folder, what to do with existing files, an optional filter and verification); <strong>Download</strong> saves a file, or a folder as <code>.tar</code>. Tick two snapshots and click <strong>Compare selected</strong> to see what changed.</p>
+<figure class="frame"><img src="img/snapshots.webp" width="1600" height="1000" loading="lazy" alt="Snapshot browser"></figure>
+<h3>On the command line</h3>
+<pre>herakles snapshots                               <span class="c"># all snapshots (--job, --host, --tag filter)</span>
+herakles ls latest /home/alex -l                 <span class="c"># list a folder of the newest snapshot</span>
+herakles ls 2939cbe7:/etc --recursive
+herakles find '*.docx'                           <span class="c"># search all snapshots</span>
+herakles find '**/projects/*/README.md' --job home
+herakles diff 2939cbe7 a3094f90                  <span class="c"># what changed between two snapshots</span>
+
+herakles restore latest --target /tmp/restore    <span class="c"># everything</span>
+herakles restore latest:/home/alex/Documents --target ~/recovered --verify
+herakles restore latest --job home --include '*.pdf' --target /tmp/pdfs
+herakles restore 2939cbe7 --target / --overwrite if-changed   <span class="c"># back to the original place</span>
+
+herakles dump latest /etc/fstab                  <span class="c"># print one file</span>
+herakles dump latest:/home/alex/projects --tar &gt; projects.tar</pre>
+<p><code>latest</code> combines with <code>--job</code>, <code>--host</code> and <code>--tag</code>, for example <code>restore latest --job home</code>. A snapshot path is written <code>SNAPSHOT:PATH</code>. On Windows, paths look like <code>latest:C:\Users\alex\Documents</code>.</p>
+<table>
+<tr><th>Option</th><th>Meaning</th></tr>
+<tr><td><code>--target DIR</code></td><td>Where to restore. A whole snapshot is restored with its full paths (<code>/tmp/restore/home/alex/…</code>); a path such as <code>latest:/home/alex/Documents</code> is restored as that folder directly inside the target (<code>~/recovered/Documents</code>).</td></tr>
+<tr><td><code>--overwrite</code></td><td><code>always</code> (default), <code>if-changed</code>, <code>never</code>.</td></tr>
+<tr><td><code>--include</code>, <code>--exclude</code></td><td>Only restore / skip matching paths (repeatable).</td></tr>
+<tr><td><code>--verify</code></td><td>Read the restored files back and compare them with the snapshot.</td></tr>
+<tr><td><code>--dry-run</code></td><td>Show what would happen.</td></tr>
+<tr><td><code>--owner</code></td><td>Restore file owners (default on when running as root).</td></tr>
+</table>
+<p>Sparse files are restored sparse. To restore on another computer, install Herakles there, point it at the repository and give it the password; the snapshots of all computers are in the same repository (<code>--host</code> filters them).</p>
+
+<h2 id="disks">Disks and partitions</h2>
+<p>Herakles can image whole devices block by block. Unused, zeroed areas deduplicate and compress to almost nothing, and later images only store changed blocks.</p>
+<pre>sudo herakles backup --repo offsite --device /dev/sda1              <span class="c"># ad hoc</span>
+<span class="c"># or in a job:  devices: [/dev/nvme0n1]</span>
+
+sudo herakles restore-device latest:/dev/sda1 --repo offsite --to /dev/sdb1 --force
+herakles restore-device 2939cbe7:/dev/nvme0n1p2 --to /tmp/root.img     <span class="c"># into an image file</span>
+herakles restore latest:/dev/sda1 --target /tmp                        <span class="c"># → /tmp/sda1 (sparse image)</span></pre>
+<p>On Windows, use <code>\\.\C:</code> for a volume or <code>\\.\PhysicalDrive0</code> for a disk, from an administrator terminal.</p>
+<div class="note"><p><strong>Consistency:</strong> an image of a mounted, changing file system can be inconsistent. Back up unmounted or read-only file systems, or create an LVM, ZFS or btrfs snapshot in a <a href="#hooks"><code>before</code> hook</a> and image that. <code>--force</code> is required to overwrite a block device, and the target must not be mounted.</p></div>
+
+<h2 id="server">Repository server</h2>
+<p>The repository server is optional. It stores repositories for other computers over HTTPS, so clients need neither a network share nor SSH access. The server only stores encrypted data: it never sees passwords, keys or file contents.</p>
+<h3 id="server-setup">Setting it up</h3>
+<pre><span class="c"># on the server machine</span>
+sudo mkdir -p /etc/herakles /srv/herakles
+sudo herakles server gen-cert /etc/herakles/server.crt /etc/herakles/server.key --hosts backup.example.com,192.168.1.10
+herakles server hash-password            <span class="c"># prints a bcrypt hash for the user list</span></pre>
+<p>Create <code>/etc/herakles/server.yaml</code>:</p>
+<pre>server:
+  listen: ":8443"
+  data_dir: /srv/herakles
+  tls_cert: /etc/herakles/server.crt
+  tls_key: /etc/herakles/server.key
+  quota_gib: 500                     <span class="c"># optional, per user</span>
+  users:
+    - name: alex
+      password_hash: "$2a$10$…"
+      repositories: ["alex-*"]       <span class="c"># default: "alex" and "alex-*"</span>
+      append_only: true              <span class="c"># may add backups, never delete</span>
+    - name: admin
+      password_hash: "$2a$10$…"
+      repositories: ["*"]            <span class="c"># for forget/prune of append-only repositories</span></pre>
+<pre>sudo herakles server run --config /etc/herakles/server.yaml</pre>
+<p>Run it permanently with a systemd unit, a container or your NAS's tools (<a href="#nas">see below</a>). Options: <code>--listen</code>, <code>--data-dir</code>, <code>--append-only</code> (for everybody), and <code>--no-auth</code> for a trusted network only. Without <code>tls_cert</code>, the server speaks plain HTTP and prints a warning.</p>
+<h4>Append-only mode</h4>
+<p>An append-only account can create snapshots but cannot delete snapshots or data. If ransomware or an attacker takes over a client, they cannot destroy its backups on the server. Retention for such repositories is applied by a separate admin account, or on the server host itself pointing at the repository folder:</p>
+<pre>herakles forget --repo /srv/herakles/alex-laptop --keep-daily 14 --keep-monthly 12 --prune</pre>
+<h3 id="server-clients">Connecting clients</h3>
+<pre>repositories:
+  - name: offsite
+    location: herakles://backup.example.com:8443/alex-laptop
+    password_file: ~/.config/herakles/password        <span class="c"># repository password (encryption)</span>
+    remote:
+      username: alex
+      password_env: HERAKLES_SERVER_PASSWORD          <span class="c"># server login</span>
+      ca_cert: ~/.config/herakles/server.crt          <span class="c"># trust the self-signed certificate</span></pre>
+<p>Copy the server's <code>server.crt</code> to the client for <code>ca_cert</code>. With a certificate from a public CA (for example behind a reverse proxy), <code>ca_cert</code> is not needed. <code>insecure_skip_verify: true</code> disables the check entirely; avoid it outside tests. Then <code>herakles init --repo offsite</code> as usual.</p>
+
+<h3 id="nas">On a NAS (QNAP, Synology)</h3>
+<p>Herakles is a single static program without dependencies, so it runs on most NAS systems. Pick the file matching the NAS CPU: <code>linux-amd64</code> for Intel/AMD models, <code>linux-arm64</code> or <code>linux-armv7</code> for ARM models. The simplest way is a container (QNAP Container Station, Synology Container Manager) with a minimal image and the Herakles file mounted into it:</p>
+<pre><span class="c"># docker-compose.yml, in a folder that also holds the herakles file and server.yaml</span>
+services:
+  herakles:
+    image: alpine:3.20
+    command: ["/app/herakles", "server", "run", "--config", "/app/server.yaml"]
+    volumes:
+      - ./herakles:/app/herakles:ro
+      - ./server.yaml:/app/server.yaml:ro
+      - ./certs:/app/certs:ro
+      - /share/Backups/herakles:/data          <span class="c"># QNAP; Synology: /volume1/backups/herakles</span>
+    ports:
+      - "8443:8443"
+    restart: unless-stopped</pre>
+<p>In <code>server.yaml</code>, set <code>data_dir: /data</code> and point <code>tls_cert</code>/<code>tls_key</code> at <code>/app/certs/…</code>. Make the file executable (<code>chmod +x herakles</code>) before starting. Without containers, you can also start <code>herakles server run</code> from the NAS's autostart mechanism over SSH.</p>
+
+<h3 id="server-vs-share">Server or network share?</h3>
+<p>Both work. Storing the repository on a mounted share or via <code>smb://</code> is the quickest setup. The server is worth it when:</p>
+<ul>
+  <li>you want <strong>append-only</strong> protection: a client with share access can delete its backups, a client of an append-only server cannot;</li>
+  <li>clients should not get <strong>share credentials</strong> at all, only a server account limited to their own repositories, with a <strong>quota</strong>;</li>
+  <li>backups go over the <strong>internet or a slow link</strong>: one HTTPS port is easy to forward, and the protocol is made for repository access, while SMB is chatty over long distances;</li>
+  <li>you want one place that hosts the repositories of many computers.</li>
+</ul>
+
+<h2 id="replication">Copies and the 3‑2‑1 rule</h2>
+<p>Keep 3 copies of your data, on 2 different media, 1 of them off-site. With Herakles, back up to a local repository and copy the snapshots to a second one:</p>
+<pre>herakles copy --from usb-disk --to offsite                  <span class="c"># all snapshots not yet there</span>
+herakles copy --from usb-disk --to offsite --job home
+herakles copy --from usb-disk --to offsite 2939cbe7</pre>
+<p>Only missing data is transferred. Both repositories can have different passwords. To automate copying, add it as an <code>after</code> hook of the job, or run it from cron or a scheduled task.</p>
+
+<h2 id="hooks">Hooks and notifications</h2>
+<h3>Hooks</h3>
+<p>Commands that run around a job, for example to dump a database or create a file system snapshot first:</p>
+<pre>hooks:
+  before:     ["pg_dump -Fc mydb -f /var/backups/mydb.dump"]
+  after:      ["rm -f /var/backups/mydb.dump"]
+  on_success: []
+  on_failure: ["logger -t herakles \"$HERAKLES_JOB failed: $HERAKLES_ERROR\""]
+  timeout: 15m</pre>
+<p>Hooks run through the system shell and receive <code>HERAKLES_JOB</code> and <code>HERAKLES_REPOSITORY</code>; the hooks after the backup also get <code>HERAKLES_STATUS</code> (<code>success</code>, <code>warning</code> or <code>failure</code>), <code>HERAKLES_SNAPSHOT</code>, <code>HERAKLES_TYPE</code> and <code>HERAKLES_ERROR</code>. If a <code>before</code> hook fails, the backup does not run.</p>
+<h3>Notifications</h3>
+<pre>notifications:
+  - type: webhook                       <span class="c"># POSTs the result as JSON</span>
+    url: https://hooks.example.com/herakles
+    on: [failure, warning]
+  - type: email
+    smtp_host: smtp.example.com
+    smtp_port: 587
+    smtp_user: alerts@example.com
+    smtp_password: secret
+    from: alerts@example.com
+    to: [admin@example.com]
+    on: [failure]
+    jobs: [home]                        <span class="c"># optional: only these jobs</span>
+  - type: command                       <span class="c"># gets the result as JSON on stdin</span>
+    command: /usr/local/bin/notify-backup</pre>
+<p><code>on</code> can contain <code>success</code>, <code>warning</code> and <code>failure</code> (default: failure and warning). A <em>warning</em> means the backup finished but some files could not be read.</p>
+
+<h2 id="maintenance">Maintenance</h2>
+<table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>herakles prune</code></td><td>Deletes data no snapshot uses any more and repacks pack files that are mostly unused (<code>--repack-threshold</code>, default 0.2). <code>--dry-run</code> shows what it would do.</td></tr>
+<tr><td><code>herakles check</code></td><td>Verifies the repository structure: index, packs, snapshots and file trees.</td></tr>
+<tr><td><code>herakles check --read-data 10%</code></td><td>Also downloads, decrypts and verifies 10 % of the data (a different sample each time; <code>100%</code> reads everything).</td></tr>
+<tr><td><code>herakles stats [SNAPSHOT]</code></td><td>Size, deduplication and compression figures.</td></tr>
+<tr><td><code>herakles unlock</code></td><td>Removes stale locks left by a crashed or killed process. <code>--remove-all</code> also removes active ones; only use it when nothing else accesses the repository.</td></tr>
+<tr><td><code>herakles repair index</code></td><td>Rebuilds the index from the pack files if it is damaged or missing.</td></tr>
+</table>
+<p>Schedule prune and check per repository so you don't have to remember them:</p>
+<pre>maintenance:
+  prune_schedule: "30 4 * * 0"      <span class="c"># Sundays 04:30</span>
+  repack_threshold: 0.2
+  check_schedule: "0 5 1 * *"       <span class="c"># 1st of every month</span>
+  check_read_data: "10%"</pre>
+<p>Interrupted backups are harmless: the next run continues and reuses data already uploaded.</p>
+
+<h2 id="interfaces">Interfaces</h2>
+<h3>Command line</h3>
+<pre>herakles init | backup | jobs | snapshots | ls | find | diff | restore | restore-device | dump
+         forget | prune | check | stats | copy | key | unlock | repair index
+         config | daemon | server | tui | gui | tray | version</pre>
+<p>Global options: <code>-c/--config</code>, <code>-r/--repo</code> (a repository name or a location), <code>--password-file</code>, <code>--key-file</code>, <code>--no-prompt</code>, <code>--json</code> (machine-readable output), <code>-q</code>, <code>-v</code>. Exit codes: <code>0</code> success, <code>1</code> error, <code>3</code> backup finished but some files could not be read. Shell completion: <code>herakles completion bash|zsh|fish|powershell</code>.</p>
+<h3>Terminal UI: <code>herakles tui</code></h3>
+<p>A full-screen interface for terminals and SSH sessions, with five tabs (keys <kbd>1</kbd>–<kbd>5</kbd> or <kbd>F1</kbd>–<kbd>F5</kbd>):</p>
+<ol>
+  <li><strong>Dashboard</strong>: jobs with schedule and last result. <kbd>Enter</kbd> chooses the backup type, <kbd>f</kbd> full, <kbd>i</kbd> incremental; live progress and cancel; <kbd>n</kbd> creates a job, edit and delete with forms.</li>
+  <li><strong>Repositories</strong>: add, edit, initialize, check, prune, statistics.</li>
+  <li><strong>Snapshots</strong>: browse snapshots as a tree, restore files or folders, forget snapshots.</li>
+  <li><strong>Config</strong>: the raw YAML with validation; <kbd>Ctrl</kbd>+<kbd>S</kbd> saves, <kbd>Ctrl</kbd>+<kbd>R</kbd> reloads.</li>
+  <li><strong>Logs</strong>: what happened in this session.</li>
+</ol>
+<h3>Desktop interface: <code>herakles gui</code></h3>
+<p>The interface runs inside Herakles and is only reachable from your own computer (<code>127.0.0.1</code>), protected by a random session token. It opens in a Chromium or Edge app window if one is installed, otherwise in your default browser. <code>--no-browser</code> just prints the address; <code>--listen</code> changes the port (default <code>127.0.0.1:7478</code>).</p>
+<ul>
+  <li><strong>Dashboard</strong>: jobs with <em>Back up now</em>, <em>Full</em>, <em>Incremental</em>, <em>Differential</em>, live progress, daemon state and next run.</li>
+  <li><strong>Snapshots &amp; Restore</strong>: browse, restore, download, compare, forget.</li>
+  <li><strong>Backup Jobs</strong>: the complete job editor with schedule presets, retention, hooks and retries.</li>
+  <li><strong>Repositories</strong>: add and edit all storage types, unlock settings, bandwidth limits, maintenance schedules; initialize, check, prune and statistics.</li>
+  <li><strong>Configuration</strong>: tray autostart and the raw YAML editor (keeps your comments).</li>
+  <li><strong>Activity Log</strong>: run history and messages.</li>
+</ul>
+<figure class="frame"><img src="img/job-editor.webp" width="1600" height="1000" loading="lazy" alt="Job editor"></figure>
+<p>To use the interface of a headless server from your PC, forward the port over SSH: <code>ssh -L 7478:127.0.0.1:7478 user@server 'herakles gui --no-browser'</code>, then open the printed address locally.</p>
+
+<h2 id="config">Configuration reference</h2>
+<p>The configuration is one YAML file. Where Herakles looks for it:</p>
+<table>
+<tr><th>System</th><th>Location</th></tr>
+<tr><td>Linux, as root</td><td><code>/etc/herakles/herakles.yaml</code></td></tr>
+<tr><td>Linux, as a user</td><td><code>~/.config/herakles/herakles.yaml</code></td></tr>
+<tr><td>Windows</td><td><code>%ProgramData%\Herakles\herakles.yaml</code> if it exists, otherwise <code>%APPDATA%\Herakles\herakles.yaml</code></td></tr>
+<tr><td>Anywhere</td><td><code>--config FILE</code> or the <code>HERAKLES_CONFIG</code> environment variable</td></tr>
+</table>
+<p>Useful commands: <code>config path</code>, <code>config validate</code>, <code>config show</code> (secrets hidden), <code>config edit</code>, <code>config example</code>, <code>config init</code>, and <code>config set repo|job</code> / <code>config set remove repo|job NAME</code> for scripts. The forms in the GUI and TUI rewrite the file (comments are lost); the raw YAML editors and <code>config edit</code> keep your comments.</p>
+<details open>
+<summary>Annotated example with every option</summary>
+<pre># Where run history, logs and the daemon token are kept.
+# state_dir: /var/lib/herakles
+
+repositories:
+  - name: local
+    location: /mnt/backup/herakles
+    # Choose one password source (or a key file, or both):
+    password_file: /etc/herakles/password
+    # password_env: HERAKLES_PASSWORD
+    # password_command: "pass show backup/herakles"
+    # password: "inline-secret"            # discouraged
+    # key_file: /etc/herakles/repo.key     # see 'herakles key generate'
+    compression: auto          # auto | none | zstd | zstd:1..4 | auto,zstd:3
+    pack_size_mib: 16
+    # connections: 4
+    maintenance:
+      prune_schedule: "30 4 * * 0"   # weekly garbage collection
+      repack_threshold: 0.2
+      check_schedule: "0 5 1 * *"    # monthly integrity check
+      check_read_data: "10%"         # ...downloading 10% of the data
+
+  - name: offsite
+    location: herakles://backup.example.com:8443/alice-laptop
+    password_env: HERAKLES_OFFSITE_PASSWORD
+    remote:
+      username: alice
+      password_env: HERAKLES_SERVER_PASSWORD
+      # ca_cert: /etc/herakles/server-ca.pem
+    upload_limit_kib: 5120     # 5 MiB/s
+
+  # - name: nas
+  #   location: smb://WORKGROUP;backup@nas.local/backups/herakles
+  #   password_file: /etc/herakles/password
+  #   remote:
+  #     password_env: NAS_PASSWORD
+
+  # - name: sftp
+  #   location: sftp://backup@host.example.com/srv/herakles
+  #   password_file: /etc/herakles/password
+  #   remote:
+  #     identity_file: ~/.ssh/id_ed25519
+
+jobs:
+  - name: home
+    description: Home directories
+    repository: local
+    paths:
+      - /home
+    exclude:
+      - "*.tmp"
+      - "**/node_modules"
+      - "**/.cache"
+      - /home/*/Downloads
+    exclude_if_present: [.nobackup]
+    exclude_caches: true
+    exclude_larger_than: 20G
+    one_file_system: false
+    tags: [home]
+    full_interval: 7d          # "auto" backups become full after this
+    schedule:
+      - cron: "0 2 * * 0"      # Sunday 02:00: full backup
+        type: full
+      - cron: "0 2 * * 1-6"    # Mon-Sat 02:00: incremental
+        type: incremental
+      - cron: "0 */4 * * *"    # every 4 hours: auto
+        type: auto
+    retention:
+      keep_last: 3
+      keep_hourly: 24
+      keep_daily: 7
+      keep_weekly: 4
+      keep_monthly: 12
+      keep_yearly: 3
+      keep_full: 2
+      keep_within: 2d
+      # keep_within_daily: 1m
+      # keep_tags: [important]
+      # group_by: job,host
+    prune: false               # prune right after forgetting snapshots
+    hooks:
+      before: ["echo starting backup of $HERAKLES_JOB"]
+      after: []
+      on_failure: []
+      timeout: 15m
+    retry:
+      attempts: 2
+      delay: 10m
+    catch_up: true             # run missed schedules when the daemon starts
+    # disabled: true           # keep the job, but don't schedule it
+
+  - name: system-disk
+    repository: offsite
+    devices:
+      - /dev/sda1              # Windows: \\.\C: or \\.\PhysicalDrive0
+    schedule:
+      - cron: "0 3 1 * *"
+        type: full
+    retention:
+      keep_monthly: 6
+
+daemon:
+  control_listen: 127.0.0.1:7477
+  max_concurrent_jobs: 1
+  # log_file: /var/log/herakles.log
+
+gui:
+  listen: 127.0.0.1:7478
+  open_browser: true
+
+tray:
+  autostart: false             # start 'herakles tray' at login
+
+server:
+  listen: ":8443"
+  data_dir: /srv/herakles
+  # tls_cert: /etc/herakles/server.crt
+  # tls_key: /etc/herakles/server.key
+  append_only: false
+  # quota_gib: 500
+  users:
+    - name: alice
+      password_hash: "$2a$10$..."   # herakles server hash-password
+      repositories: ["alice-*"]
+      append_only: true
+
+notifications:
+  - type: webhook
+    url: https://hooks.example.com/herakles
+    on: [failure, warning]</pre>
+</details>
+
+<h2 id="security">Security</h2>
+<ul>
+  <li><strong>Encryption:</strong> all data and metadata (file names, sizes, dates) are encrypted with AES‑256‑GCM. Each repository has a random master key, stored only wrapped with a key derived from your password and/or key file using Argon2id.</li>
+  <li><strong>No leaks through IDs:</strong> chunk IDs are keyed HMAC‑SHA256 values, so the storage cannot tell which known files you have. The chunking itself uses a secret per-repository parameter.</li>
+  <li><strong>Tamper detection:</strong> every stored file is named after its hash, and every blob is authenticated, so corruption or manipulation is detected on read and by <code>check</code>.</li>
+  <li><strong>Server:</strong> sees only encrypted data. Accounts use bcrypt password hashes, per-user repository patterns, quotas and optional append-only mode. Use TLS outside a trusted network.</li>
+  <li><strong>Local interfaces:</strong> the GUI and the daemon's control API only listen on <code>127.0.0.1</code> and require a random token; the GUI also checks the <code>Host</code> header and guards against cross-site requests.</li>
+  <li><strong>Password files</strong> should be readable only by the user running the backup (<code>chmod 600</code>). <code>config show</code> hides secrets.</li>
+</ul>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+<details><summary>“repository … has no non-interactive password source; the daemon cannot prompt”</summary>
+<p>The system service cannot ask for passwords. Set <code>password_file</code>, <code>password_env</code>, <code>password_command</code> or <code>key_file</code> on the repository, or use the <a href="#tray">tray</a> instead, which can ask in its window.</p></details>
+<details><summary>“repository is locked”</summary>
+<p>Another Herakles process uses the repository, or one was killed. Locks of dead processes become stale; remove them with <code>herakles unlock</code>. Only if you are sure nothing else is running, use <code>herakles unlock --remove-all</code>.</p></details>
+<details><summary>“control API: … address already in use”</summary>
+<p>A daemon is already running, usually the tray and the system service at the same time. Use one of them (<code>herakles daemon stop</code> / <code>uninstall</code>, or quit the tray and <code>herakles tray autostart off</code>), or give one a different <code>daemon.control_listen</code>.</p></details>
+<details><summary>The tray icon does not appear</summary>
+<p>On GNOME, install the <em>AppIndicator and KStatusNotifierItem Support</em> extension. On other desktops, make sure a system tray / status notifier area is part of the panel. Herakles keeps running without the icon; <code>herakles tray</code> again opens its window, and <code>herakles daemon status</code> shows it is alive.</p></details>
+<details><summary>The GUI says “session expired”</summary>
+<p>The window belongs to a Herakles process that has ended or restarted. Open it again from the tray icon or with <code>herakles gui</code>.</p></details>
+<details><summary>Exit code 3 / status “warning”</summary>
+<p>The backup finished, but some files could not be read: typically permission problems, or files locked by other programs on Windows. The log and <code>herakles jobs</code> show which. Run the backup with sufficient rights or exclude the files.</p></details>
+<details><summary>The first backup is slow</summary>
+<p>The first backup reads, compresses, encrypts and uploads everything. Later incremental backups only read changed files and are usually done in seconds to minutes. Bandwidth limits (<code>upload_limit_kib</code>) slow down remote backups on purpose.</p></details>
+<details><summary>The repository grows although snapshots were forgotten</summary>
+<p>Forgetting only removes snapshots; run <code>herakles prune</code>, set <code>prune: true</code> on the job, or add a <code>maintenance.prune_schedule</code>.</p></details>
+<details><summary>An error mentions a damaged or missing index</summary>
+<p>Run <code>herakles repair index</code>, then <code>herakles check --read-data 10%</code> to make sure the data is intact.</p></details>
+<details><summary>I lost the repository password</summary>
+<p>If another key (a second password or a key file) exists, unlock with it and add a new password with <code>herakles key add</code>. Without any key, the data cannot be recovered. Create a fresh repository and back up again.</p></details>
+
+<h2 id="faq">FAQ</h2>
+<details><summary>Do I need the server?</summary>
+<p>No. Herakles works completely on its own on one computer, with the repository on a local disk, a network share or SFTP. The server is an option for central, protected storage of several computers.</p></details>
+<details><summary>Can several computers use the same repository?</summary>
+<p>Yes. Snapshots record the host name, retention works per job and host by default, and identical data across computers is stored only once. Each computer needs the repository password.</p></details>
+<details><summary>Is an incremental backup enough, or do I need regular full backups?</summary>
+<p>Every snapshot is complete, so incremental backups alone are safe to restore from. Full backups re-read everything and catch the rare file that changed without a new modification time. A weekly or monthly full backup (or <code>auto</code> with <code>full_interval</code>) is a good habit. Thanks to deduplication, a full backup of unchanged data adds almost nothing to the repository.</p></details>
+<details><summary>How much space do backups take?</summary>
+<p>Roughly the size of your data after compression, plus whatever changes over time within your retention. <code>herakles stats</code> shows the real figures.</p></details>
+<details><summary>Can I move a repository?</summary>
+<p>Yes. A repository is just a folder of files; copy it anywhere (rsync, a file manager, a USB disk) and change the <code>location</code>.</p></details>
+<details><summary>Can I restore without Herakles installed?</summary>
+<p>You need Herakles to read a repository, because the data is encrypted and split into chunks. Keep a copy of the program next to your password, for example on the backup disk itself; it's a single file.</p></details>
+<details><summary>Can I use Herakles from scripts?</summary>
+<p>Yes. Every function is a command, <code>--json</code> gives machine-readable output, <code>--no-prompt</code> prevents interactive questions, and the exit code tells you whether it worked.</p></details>
+
+<h2 id="limitations">Limitations</h2>
+<ul>
+  <li>No Windows Volume Shadow Copy (VSS) yet: files locked by other programs may not be readable. They are reported, not fatal.</li>
+  <li>Hard links are stored and restored as separate files (deduplicated, so they take no extra space).</li>
+  <li>Windows ACLs and alternate data streams are not preserved. POSIX permissions, ownership and extended attributes are.</li>
+  <li>No FUSE mount of snapshots. Use <code>ls</code>, <code>find</code>, <code>dump</code>, the TUI or the GUI.</li>
+  <li>The macOS build is experimental and has no tray icon.</li>
+</ul>
+</article>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div>Herakles @VERSION@ · © 2026 Marius Klöck</div>
+    <div><a href="./">Home</a> · <a href="./#download">Download</a> · <a href="downloads/SHA256SUMS">Checksums</a></div>
+  </div>
+</footer>
+<script>
+(() => {
+  // Highlight the section in view in the table of contents.
+  const links = [...document.querySelectorAll('#toc a')];
+  const byId = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const heads = [...document.querySelectorAll('.doc h2[id], .doc h3[id]')].filter(h => byId.has(h.id));
+  const update = () => {
+    let cur = heads[0];
+    for (const h of heads) if (h.getBoundingClientRect().top < 120) cur = h;
+    links.forEach(a => a.classList.remove('active'));
+    if (cur) byId.get(cur.id).classList.add('active');
+  };
+  document.addEventListener('scroll', update, { passive: true });
+  update();
+  for (const h of document.querySelectorAll('.doc h2[id], .doc h3[id]'))
+    h.insertAdjacentHTML('beforeend', '<a class="anchor" href="#' + h.id + '" aria-label="Link to this section">#</a>');
+})();
+</script>
+</body>
+</html>
