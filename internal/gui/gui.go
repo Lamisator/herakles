@@ -29,6 +29,7 @@ import (
 	"github.com/lamisator/herakles/internal/engine"
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/restorer"
+	"github.com/lamisator/herakles/internal/tray"
 )
 
 //go:embed static
@@ -322,6 +323,7 @@ func (s *Server) saveConfig(c *config.Config) error {
 		return err
 	}
 	s.eng.SetConfig(c)
+	tray.ApplyLogged(c, s.eng.Log)
 	if cl, err := daemon.NewClient(c); err == nil {
 		_ = cl.Reload()
 	}
@@ -373,6 +375,7 @@ func (s *Server) putYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.eng.SetConfig(c)
+	tray.ApplyLogged(c, s.eng.Log)
 	if cl, err := daemon.NewClient(c); err == nil {
 		_ = cl.Reload()
 	}

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lamisator/herakles/internal/config"
+	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/gui"
 	"github.com/lamisator/herakles/internal/tray"
 )
@@ -35,43 +39,61 @@ Starting it a second time opens the window of the running instance.`,
 		},
 	}
 	cmd.Flags().BoolVar(&openNow, "open", false, "open the GUI window right away")
-	install := &cobra.Command{
-		Use:   "install",
-		Short: "Start the tray at login and add Herakles to the applications menu",
-		Args:  cobra.NoArgs,
+	autostart := &cobra.Command{
+		Use:   "autostart [on|off]",
+		Short: "Start the tray when you log in (sets tray.autostart)",
+		Long: `Set tray.autostart in the configuration and apply it: with "on", Herakles
+starts in the tray when you log in, and "Herakles Backup" is added to the
+applications menu (Linux: XDG autostart; Windows: the Run registry key).
+Without an argument, show the current setting. Saving the option in the
+GUI, TUI or YAML editor has the same effect.`,
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"on", "off"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exe, err := os.Executable()
+			if len(args) == 0 {
+				state := "off"
+				if a.cfg.Tray.Autostart {
+					state = "on"
+				}
+				a.printf("tray autostart is %s\n", state)
+				return nil
+			}
+			if args[0] != "on" && args[0] != "off" {
+				return fmt.Errorf("use 'on' or 'off', not %q", args[0])
+			}
+			on := args[0] == "on"
+			// Start from the file, not a.cfg, which may hold command line
+			// credential overrides.
+			c, err := config.Load(a.cfg.Path())
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				c = config.New(a.cfg.Path())
+			case err != nil:
+				return err
+			}
+			c.Tray.Autostart = on
+			if err := c.Save(); err != nil {
+				return err
+			}
+			changed, err := tray.Apply(c)
+			for _, f := range changed {
+				a.printf("updated %s\n", f)
+			}
 			if err != nil {
 				return err
 			}
-			if exe, err = filepath.EvalSymlinks(exe); err != nil {
-				return err
+			if cl, err := daemon.NewClient(c); err == nil {
+				_ = cl.Reload()
 			}
-			cfgPath, err := filepath.Abs(a.cfg.Path())
-			if err != nil {
-				return err
+			if on {
+				a.printf("Herakles starts in the tray when you log in; run 'herakles tray' to start it now.\n")
+			} else {
+				a.printf("tray autostart is off\n")
 			}
-			written, err := tray.Install(tray.Command{Exe: exe, Args: []string{"--config", cfgPath, "tray"}})
-			for _, w := range written {
-				a.printf("wrote %s\n", w)
-			}
-			if err == nil {
-				a.printf("Herakles starts in the tray at your next login; run 'herakles tray' to start it now.\n")
-			}
-			return err
+			return nil
 		},
 	}
-	uninstall := &cobra.Command{
-		Use: "uninstall", Short: "Undo 'tray install'", Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			removed, err := tray.Uninstall()
-			for _, r := range removed {
-				a.printf("removed %s\n", r)
-			}
-			return err
-		},
-	}
-	cmd.AddCommand(install, uninstall)
+	cmd.AddCommand(autostart)
 	return cmd
 }
 
@@ -86,7 +108,7 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 	tray.DetachConsole()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	d, closer, err := a.newDaemon(ctx)
+	d, closer, err := a.newDaemon(ctx, func(c *config.Config) { tray.ApplyLogged(c, a.eng.Log) })
 	if err != nil {
 		return err
 	}
@@ -98,6 +120,7 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 		}
 		return fmt.Errorf("%w (is another Herakles daemon running? see 'herakles daemon status')", err)
 	}
+	tray.ApplyLogged(a.cfg, a.eng.Log)
 	for _, name := range a.eng.Locked() {
 		a.eng.Log.Warn("repository needs its password before scheduled backups can run; unlock it in the GUI", "repo", name)
 	}

@@ -156,3 +156,32 @@ func (l *lockedBuffer) String() string {
 	defer l.mu.Unlock()
 	return l.b.String()
 }
+
+func TestTrayAutostartCommand(t *testing.T) {
+	e := newEnv(t)
+	e.setup()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(e.dir, "xdg-config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(e.dir, "xdg-data"))
+	entry := filepath.Join(e.dir, "xdg-config", "autostart", "herakles.desktop")
+	if out := e.ok("tray", "autostart"); out != "tray autostart is off\n" {
+		t.Fatal(out)
+	}
+	e.ok("tray", "autostart", "on")
+	cfg, err := config.Load(e.cfg)
+	if err != nil || !cfg.Tray.Autostart {
+		t.Fatal("tray.autostart not saved", err)
+	}
+	if b, err := os.ReadFile(entry); err != nil || !strings.Contains(string(b), " --config "+e.cfg+" tray\n") {
+		t.Fatal(string(b), err)
+	}
+	if out := e.ok("tray", "autostart"); out != "tray autostart is on\n" {
+		t.Fatal(out)
+	}
+	e.ok("tray", "autostart", "off")
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatal("autostart entry not removed")
+	}
+	if _, _, code := e.run("tray", "autostart", "maybe"); code == 0 {
+		t.Fatal("invalid argument accepted")
+	}
+}

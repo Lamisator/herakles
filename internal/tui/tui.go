@@ -20,6 +20,7 @@ import (
 	"github.com/lamisator/herakles/internal/engine"
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/retention"
+	"github.com/lamisator/herakles/internal/tray"
 	"github.com/lamisator/herakles/internal/ui"
 )
 
@@ -307,6 +308,7 @@ func (u *UI) saveConfig(c *config.Config) error {
 		return err
 	}
 	u.eng.SetConfig(c)
+	tray.ApplyLogged(c, u.eng.Log)
 	u.mu.Lock()
 	u.open = map[string]*repository.Repository{}
 	u.mu.Unlock()

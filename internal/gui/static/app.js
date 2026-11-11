@@ -607,8 +607,21 @@ async function editRepo(name) {
 // ---------- settings (YAML) ----------
 views.settings = async main => {
   const data = await api('GET', '/api/config/yaml');
+  const cfg = await loadConfig();
   const ta = h('textarea', { rows: 32, spellcheck: 'false' }, data.yaml);
-  main.append(h('h1', {}, 'Configuration'), h('div', { class: 'sub' }, 'Full YAML configuration (', h('span', { class: 'mono' }, data.path), '). Comments are preserved when saving here. Everything — notifications, daemon and server settings — can be edited.'),
+  const autostart = h('input', { type: 'checkbox', checked: !!(cfg.tray && cfg.tray.autostart), onchange: async e => {
+    try {
+      const c = await loadConfig();
+      c.tray = Object.assign({}, c.tray, { autostart: e.target.checked });
+      await saveConfig(c);
+      ta.value = (await api('GET', '/api/config/yaml')).yaml;
+    } catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+  } });
+  main.append(h('h1', {}, 'Configuration'),
+    h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
+      h('label', { class: 'check' }, autostart, 'Start Herakles in the system tray when I log in'),
+      h('div', { class: 'meta' }, 'Runs scheduled backups and this interface in the background (tray.autostart). Use either this or the daemon service.')),
+    h('div', { class: 'sub' }, 'Full YAML configuration (', h('span', { class: 'mono' }, data.path), '). Comments are preserved when saving here. Everything — notifications, daemon and server settings — can be edited.'),
     h('div', { class: 'toolbar' },
       h('button', { class: 'primary', onclick: async () => { try { await api('PUT', '/api/config/yaml', { yaml: ta.value }); toast('Saved and applied'); } catch (e) { toast(e.message, true); } } }, 'Validate & save'),
       h('button', { onclick: async () => { const d = await api('GET', '/api/config/yaml'); ta.value = d.yaml; toast('Reverted'); } }, 'Revert'),

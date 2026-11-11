@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lamisator/herakles/internal/archiver"
+	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/engine"
 )
@@ -153,5 +154,49 @@ func TestInstallUninstall(t *testing.T) {
 	}
 	if removed, err = Uninstall(); err != nil || len(removed) != 0 {
 		t.Fatal("second uninstall", removed, err)
+	}
+}
+
+func TestApply(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("Windows uses the registry")
+	}
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	entry := filepath.Join(dir, "cfg", "autostart", "herakles.desktop")
+	cfg := config.New(filepath.Join(dir, "my config.yaml"))
+
+	if changed, err := Apply(cfg); err != nil || changed != nil {
+		t.Fatal("disabled and not installed must be a no-op", changed, err)
+	}
+	cfg.Tray.Autostart = true
+	if changed, err := Apply(cfg); err != nil || len(changed) != 3 {
+		t.Fatal(changed, err)
+	}
+	b, _ := os.ReadFile(entry)
+	if !strings.Contains(string(b), `--config "`+filepath.Join(dir, "my config.yaml")+`" tray`+"\n") {
+		t.Fatal(string(b))
+	}
+	if changed, err := Apply(cfg); err != nil || changed != nil {
+		t.Fatal("already installed must be a no-op", changed, err)
+	}
+
+	// Disabling in another configuration leaves this one's entry alone.
+	other := config.New(filepath.Join(dir, "other.yaml"))
+	if changed, err := Apply(other); err != nil || changed != nil {
+		t.Fatal(changed, err)
+	}
+	// Enabling it there takes the entry over.
+	other.Tray.Autostart = true
+	if changed, err := Apply(other); err != nil || len(changed) != 3 {
+		t.Fatal(changed, err)
+	}
+	other.Tray.Autostart = false
+	if changed, err := Apply(other); err != nil || len(changed) != 3 {
+		t.Fatal("disabling removes its own entry", changed, err)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatal("entry still there")
 	}
 }

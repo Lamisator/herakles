@@ -188,14 +188,22 @@ On a desktop this is the easiest way to run Herakles. One process runs the daemo
 
 ```sh
 herakles tray                 # run it now (add --open to open the window right away)
-herakles tray install         # start it at login + add "Herakles Backup" to the applications menu
-herakles tray uninstall
+herakles tray autostart on    # start it when you log in; "off" to stop, no argument shows the setting
 ```
+
+Autostart is the `tray.autostart` option in the YAML file:
+
+```yaml
+tray:
+  autostart: true
+```
+
+It is applied whenever the configuration is saved, from the GUI (checkbox under *Configuration → Desktop*), the TUI, `config edit`, `tray autostart`, and when the tray starts or reloads. When on, Herakles adds a login autostart entry and a *Herakles Backup* launcher to the applications menu; when off, it removes them (only if they start this configuration file). It starts with your desktop session, so it needs a login. For backups at boot without anyone logged in, use the daemon service (`daemon install`) instead.
 
 * Starting it a second time (e.g. from the applications menu) opens the window of the running instance.
 * Unlike the system service, it does not need a stored password: a repository without a password source shows as locked until you unlock it in the GUI; scheduled backups then use the password until you quit.
 * Linux: works with every desktop that supports StatusNotifierItem tray icons (KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar, …). On GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. If the panel starts after Herakles, the icon appears as soon as it is ready. Without a desktop session, it keeps running as daemon + GUI and prints the GUI URL.
-* Windows: `tray install` adds it to `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login.
+* Windows: autostart uses `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login.
 * Run either the tray or the daemon service, not both: they share the control port.
 
 ### Daemon

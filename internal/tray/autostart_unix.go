@@ -11,6 +11,28 @@ import (
 
 const desktopFile = "herakles.desktop"
 
+func iconPath(dataDir string) string {
+	return filepath.Join(dataDir, "icons", "hicolor", "256x256", "apps", "herakles.png")
+}
+
+// autostartEntry is the XDG autostart file Install writes for cmd.
+func autostartEntry(cmd Command) string {
+	_, dataDir, _ := xdgDirs()
+	return desktopEntry(cmd, iconPath(dataDir), true)
+}
+
+// installedEntry returns the current XDG autostart file, if any.
+func installedEntry() (string, bool) {
+	cfgDir, _, err := xdgDirs()
+	if err != nil {
+		return "", false
+	}
+	b, err := os.ReadFile(filepath.Join(cfgDir, "autostart", desktopFile))
+	return string(b), err == nil
+}
+
+func quoteArg(s string) string { return desktopQuote(s) }
+
 // Install starts cmd at login (XDG autostart) and adds a launcher to the
 // applications menu that runs cmd with --open, so it opens the window. It
 // returns the files written.
@@ -19,7 +41,7 @@ func Install(cmd Command) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	icon := filepath.Join(dataDir, "icons", "hicolor", "256x256", "apps", "herakles.png")
+	icon := iconPath(dataDir)
 	launcher := Command{Exe: cmd.Exe, Args: append(append([]string{}, cmd.Args...), "--open")}
 	files := []struct {
 		path string
@@ -52,7 +74,7 @@ func Uninstall() ([]string, error) {
 	for _, p := range []string{
 		filepath.Join(cfgDir, "autostart", desktopFile),
 		filepath.Join(dataDir, "applications", desktopFile),
-		filepath.Join(dataDir, "icons", "hicolor", "256x256", "apps", "herakles.png"),
+		iconPath(dataDir),
 	} {
 		switch err := os.Remove(p); {
 		case err == nil:

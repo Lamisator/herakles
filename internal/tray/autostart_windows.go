@@ -12,6 +12,29 @@ import (
 
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
+// autostartEntry is the Run registry value Install writes for cmd.
+func autostartEntry(cmd Command) string {
+	args := []string{cmd.Exe}
+	args = append(args, cmd.Args...)
+	for i, a := range args {
+		args[i] = syscall.EscapeArg(a)
+	}
+	return strings.Join(args, " ")
+}
+
+// installedEntry returns the current Run registry value, if any.
+func installedEntry() (string, bool) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE)
+	if err != nil {
+		return "", false
+	}
+	defer k.Close()
+	v, _, err := k.GetStringValue("Herakles")
+	return v, err == nil
+}
+
+func quoteArg(s string) string { return syscall.EscapeArg(s) }
+
 // Install starts cmd at login through the user's Run registry key.
 func Install(cmd Command) ([]string, error) {
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, runKey, registry.SET_VALUE)
@@ -19,12 +42,7 @@ func Install(cmd Command) ([]string, error) {
 		return nil, err
 	}
 	defer k.Close()
-	args := []string{cmd.Exe}
-	args = append(args, cmd.Args...)
-	for i, a := range args {
-		args[i] = syscall.EscapeArg(a)
-	}
-	if err := k.SetStringValue("Herakles", strings.Join(args, " ")); err != nil {
+	if err := k.SetStringValue("Herakles", autostartEntry(cmd)); err != nil {
 		return nil, err
 	}
 	return []string{`HKCU\` + runKey + `\Herakles`}, nil

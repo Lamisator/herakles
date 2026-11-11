@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lamisator/herakles/internal/config"
+	"github.com/lamisator/herakles/internal/tray"
 )
 
 func (a *App) configCmd() *cobra.Command {
@@ -104,7 +105,8 @@ func (a *App) configCmd() *cobra.Command {
 					if err := c.Run(); err != nil {
 						return err
 					}
-					if _, err := config.Load(p); err != nil {
+					loaded, err := config.Load(p)
+					if err != nil {
 						fmt.Fprintf(a.err, "configuration is invalid:\n%v\n", err)
 						if !a.isTTY() {
 							return err
@@ -117,6 +119,7 @@ func (a *App) configCmd() *cobra.Command {
 						}
 						continue
 					}
+					tray.ApplyLogged(loaded, a.eng.Log)
 					a.printf("configuration saved and valid\n")
 					return nil
 				}

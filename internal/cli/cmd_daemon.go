@@ -238,7 +238,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 			return fmt.Errorf("repository %s has no non-interactive password source; the daemon cannot prompt (set password_file, password_env, password_command or key_file)", rc.Name)
 		}
 	}
-	d, closer, err := a.newDaemon(ctx)
+	d, closer, err := a.newDaemon(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -247,8 +247,9 @@ func (a *App) runDaemon(ctx context.Context) error {
 }
 
 // newDaemon sets up logging and creates the daemon; it reloads the
-// configuration on SIGHUP until ctx ends.
-func (a *App) newDaemon(ctx context.Context) (*daemon.Daemon, io.Closer, error) {
+// configuration on SIGHUP until ctx ends. onReload, if set, sees every
+// configuration loaded by a reload.
+func (a *App) newDaemon(ctx context.Context, onReload func(*config.Config)) (*daemon.Daemon, io.Closer, error) {
 	if len(a.cfg.Jobs) == 0 {
 		fmt.Fprintf(a.err, "warning: no jobs configured in %s\n", a.cfg.Path())
 	}
@@ -260,7 +261,13 @@ func (a *App) newDaemon(ctx context.Context) (*daemon.Daemon, io.Closer, error) 
 	a.eng.Log = log
 	a.eng.Prompt = nil
 	path := a.cfg.Path()
-	d, err := daemon.New(ctx, a.eng, daemon.Options{Version: Version, Logs: buf, Reload: func() (*config.Config, error) { return config.Load(path) }})
+	d, err := daemon.New(ctx, a.eng, daemon.Options{Version: Version, Logs: buf, Reload: func() (*config.Config, error) {
+		c, err := config.Load(path)
+		if err == nil && onReload != nil {
+			onReload(c)
+		}
+		return c, err
+	}})
 	if err != nil {
 		closer.Close()
 		return nil, nil, err

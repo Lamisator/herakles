@@ -15,6 +15,7 @@ import (
 	"github.com/lamisator/herakles/internal/id"
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/restorer"
+	"github.com/lamisator/herakles/internal/tray"
 	"github.com/lamisator/herakles/internal/ui"
 )
 
@@ -528,6 +529,7 @@ func (u *UI) buildYAML() tview.Primitive {
 				return nil
 			}
 			u.eng.SetConfig(c)
+			tray.ApplyLogged(c, u.eng.Log)
 			if cl, err := daemon.NewClient(c); err == nil {
 				_ = cl.Reload()
 			}

@@ -258,3 +258,33 @@ func TestConfigEditing(t *testing.T) {
 		t.Fatal("invalid YAML saved")
 	}
 }
+
+func TestAutostartOption(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("Windows uses the registry")
+	}
+	c, s, _ := setup(t, true)
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	entry := filepath.Join(dir, "cfg", "autostart", "herakles.desktop")
+
+	cfg := *s.eng.Config()
+	cfg.Tray.Autostart = true
+	if code := c.json("PUT", "/api/config", &cfg, nil); code != 200 {
+		t.Fatal(code)
+	}
+	if _, err := os.Stat(entry); err != nil {
+		t.Fatal("saving the form did not install the autostart entry:", err)
+	}
+	// The raw YAML editor applies it too.
+	var y struct{ YAML string }
+	c.json("GET", "/api/config/yaml", nil, &y)
+	y.YAML = strings.Replace(y.YAML, "autostart: true", "autostart: false", 1)
+	if code := c.json("PUT", "/api/config/yaml", map[string]string{"yaml": y.YAML}, nil); code != 200 {
+		t.Fatal(code)
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatal("saving YAML with autostart: false left the entry")
+	}
+}

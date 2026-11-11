@@ -120,6 +120,11 @@ gui:
   listen: 127.0.0.1:7478
   open_browser: true
 
+tray:
+  # Start 'herakles tray' (scheduled backups, GUI and a tray icon) when you
+  # log in to your desktop. Use either this or the daemon service.
+  autostart: false
+
 server:
   listen: ":8443"
   data_dir: /srv/herakles

@@ -30,6 +30,7 @@ type Config struct {
 	Jobs          []*Job          `yaml:"jobs" json:"jobs"`
 	Daemon        Daemon          `yaml:"daemon,omitempty" json:"daemon"`
 	GUI           GUI             `yaml:"gui,omitempty" json:"gui"`
+	Tray          Tray            `yaml:"tray,omitempty" json:"tray"`
 	Server        Server          `yaml:"server,omitempty" json:"server"`
 	Notifications []*Notification `yaml:"notifications,omitempty" json:"notifications"`
 	// StateDir stores run history, logs and the daemon token.
@@ -182,6 +183,15 @@ type GUI struct {
 
 // IsZero lets yaml omit empty sections.
 func (g GUI) IsZero() bool { return g.Listen == "" && g.OpenBrowser == nil }
+
+// Tray configures the desktop tray mode ('herakles tray').
+type Tray struct {
+	// Autostart starts the tray (daemon + GUI) when the user logs in.
+	Autostart bool `yaml:"autostart,omitempty" json:"autostart,omitempty"`
+}
+
+// IsZero lets yaml omit empty sections.
+func (t Tray) IsZero() bool { return t == Tray{} }
 
 // Server configures the repository server.
 type Server struct {
