@@ -22,22 +22,27 @@ const (
 	KindPrune  = "prune"
 	KindCheck  = "check"
 	KindForget = "forget"
+	// KindRestore restores a Docker project ("job/project"); Params hold
+	// the ProjectRestoreOptions (snapshot, databases, keep_old, no_start).
+	KindRestore = "restore"
 )
 
 // Run is a queued or running task.
 type Run struct {
-	ID       string             `json:"id"`
-	Kind     string             `json:"kind"`
-	Target   string             `json:"target"` // job or repository name
-	Type     string             `json:"type,omitempty"`
-	Trigger  string             `json:"trigger"`
-	Queued   time.Time          `json:"queued"`
-	Started  time.Time          `json:"started,omitempty"`
-	State    string             `json:"state"` // queued, running, done
-	Progress *archiver.Progress `json:"-"`
-	Message  string             `json:"message,omitempty"`
-	Result   *engine.JobResult  `json:"result,omitempty"`
-	Error    string             `json:"error,omitempty"`
+	ID       string                       `json:"id"`
+	Kind     string                       `json:"kind"`
+	Target   string                       `json:"target"` // job or repository name
+	Type     string                       `json:"type,omitempty"`
+	Trigger  string                       `json:"trigger"`
+	Queued   time.Time                    `json:"queued"`
+	Started  time.Time                    `json:"started,omitempty"`
+	State    string                       `json:"state"` // queued, running, done
+	Progress *archiver.Progress           `json:"-"`
+	Message  string                       `json:"message,omitempty"`
+	Result   *engine.JobResult            `json:"result,omitempty"`
+	Params   map[string]string            `json:"params,omitempty"`
+	Restore  *engine.ProjectRestoreResult `json:"restore,omitempty"`
+	Error    string                       `json:"error,omitempty"`
 	attempt  int
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -87,15 +92,33 @@ func (rn *Runner) Engine() *engine.Engine { return rn.eng }
 
 // Enqueue schedules a task.
 func (rn *Runner) Enqueue(kind, target, typ, trigger string) (*Run, error) {
-	return rn.enqueue(kind, target, typ, trigger, 0)
+	return rn.enqueue(kind, target, typ, trigger, 0, nil)
 }
 
-func (rn *Runner) enqueue(kind, target, typ, trigger string, attempt int) (*Run, error) {
+// EnqueueParams queues a task with extra parameters (used by KindRestore).
+func (rn *Runner) EnqueueParams(kind, target, trigger string, params map[string]string) (*Run, error) {
+	return rn.enqueue(kind, target, "", trigger, 0, params)
+}
+
+// validUnit accepts a job name or, for Docker jobs, "job/project".
+func validUnit(cfg *config.Config, target string) error {
+	job, project := config.SplitUnit(target)
+	j := cfg.Job(job)
+	if j == nil {
+		return fmt.Errorf("unknown job %q", job)
+	}
+	if project != "" && j.Docker == nil {
+		return fmt.Errorf("job %s has no docker section", job)
+	}
+	return nil
+}
+
+func (rn *Runner) enqueue(kind, target, typ, trigger string, attempt int, params map[string]string) (*Run, error) {
 	cfg := rn.eng.Config()
 	switch kind {
 	case KindBackup:
-		if cfg.Job(target) == nil {
-			return nil, fmt.Errorf("unknown job %q", target)
+		if err := validUnit(cfg, target); err != nil {
+			return nil, err
 		}
 		if !config.ValidBackupType(typ) {
 			return nil, fmt.Errorf("invalid backup type %q", typ)
@@ -108,11 +131,18 @@ func (rn *Runner) enqueue(kind, target, typ, trigger string, attempt int) (*Run,
 		if cfg.Job(target) == nil {
 			return nil, fmt.Errorf("unknown job %q", target)
 		}
+	case KindRestore:
+		if _, project := config.SplitUnit(target); project == "" {
+			return nil, fmt.Errorf("restore needs JOB/PROJECT, got %q", target)
+		}
+		if err := validUnit(cfg, target); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unknown task kind %q", kind)
 	}
 	r := &Run{ID: strconv.FormatInt(rn.seq.Add(1), 10), Kind: kind, Target: target, Type: typ, Trigger: trigger,
-		Queued: time.Now(), State: "queued", done: make(chan struct{}), attempt: attempt}
+		Queued: time.Now(), State: "queued", done: make(chan struct{}), attempt: attempt, Params: params}
 	if kind == KindBackup {
 		r.Progress = &archiver.Progress{}
 	}
@@ -161,6 +191,16 @@ func (rn *Runner) do(ctx context.Context, r *Run) error {
 		res, err := e.RunJob(ctx, r.Target, engine.RunOptions{Type: r.Type, Trigger: r.Trigger, Progress: r.Progress})
 		rn.mu.Lock()
 		r.Result = res
+		rn.mu.Unlock()
+		return err
+	case KindRestore:
+		p := r.Params
+		res, err := e.RestoreProject(ctx, r.Target, engine.ProjectRestoreOptions{
+			Snapshot: p["snapshot"], Databases: p["databases"], KeepOld: p["keep_old"] == "true", NoStart: p["no_start"] == "true",
+			Progress: func(m string) { rn.setMessage(r, m) },
+		})
+		rn.mu.Lock()
+		r.Restore = res
 		rn.mu.Unlock()
 		return err
 	case KindForget:

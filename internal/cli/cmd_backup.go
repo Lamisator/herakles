@@ -195,6 +195,33 @@ func (a *App) printResult(res *engine.JobResult) {
 		return
 	}
 	s := res.Summary
+	if len(res.Projects) > 0 {
+		a.printf("job %s: %d Docker projects (%s)\n", res.Job, len(res.Projects), res.Status)
+		for _, p := range res.Projects {
+			line := fmt.Sprintf("  %-24s %-8s", p.Project, p.Status)
+			if p.Snapshot != "" {
+				line += fmt.Sprintf(" %s -> %s", p.Type, p.Snapshot[:8])
+			}
+			if p.Summary != nil {
+				line += fmt.Sprintf(", %s, %s new", ui.Bytes(p.Summary.TotalBytes), ui.Bytes(p.Summary.BytesAdded))
+			}
+			if p.Dumps > 0 {
+				line += fmt.Sprintf(", %d database dumps", p.Dumps)
+			}
+			if p.Stopped {
+				line += ", stopped during backup"
+			}
+			if p.Error != "" {
+				line += " (" + p.Error + ")"
+			}
+			a.printf("%s\n", line)
+		}
+		if res.Snapshot != "" {
+			a.printf("  %-24s %-8s -> %s\n", "(job paths)", "success", res.Snapshot[:8])
+		}
+		a.printf("  total: %d files, %s; %s new, %s stored; took %s\n", s.TotalFiles, ui.Bytes(s.TotalBytes), ui.Bytes(s.BytesAdded), ui.Bytes(s.BytesStored), ui.Duration(res.End.Sub(res.Start)))
+		return
+	}
 	a.printf("job %s: %s backup -> snapshot %s (%s)\n", res.Job, res.Type, res.Snapshot[:8], res.Status)
 	a.printf("  files: %d new, %d changed, %d unmodified (%d total, %s)\n", s.FilesNew, s.FilesChanged, s.FilesUnmodified, s.TotalFiles, ui.Bytes(s.TotalBytes))
 	a.printf("  added: %s of new data, %s stored after compression; took %s\n", ui.Bytes(s.BytesAdded), ui.Bytes(s.BytesStored), ui.Duration(s.End.Sub(s.Start)))

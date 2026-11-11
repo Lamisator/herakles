@@ -163,7 +163,7 @@ func (s *Scheduler) onFinish(r *Run, err error) {
 		defer t.Stop()
 		select {
 		case <-t.C:
-			_, _ = s.rn.enqueue(KindBackup, r.Target, r.Type, "retry", r.attempt+1)
+			_, _ = s.rn.enqueue(KindBackup, r.Target, r.Type, "retry", r.attempt+1, nil)
 		case <-s.rn.ctx.Done():
 		}
 	}()

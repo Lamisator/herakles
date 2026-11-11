@@ -86,3 +86,21 @@ legend { padding: 0 6px; font-weight: 600; font-size: 13px; }
 a.btn { text-decoration: none; display: inline-block; }
 a.btn.small { padding: 3px 8px; font-size: 12.5px; }
 td.normal { white-space: normal; }
+
+/* sign-in page */
+.login-page { display: grid; place-items: center; min-height: 100vh; background: var(--side); padding: 16px; }
+.login-card { width: 100%; max-width: 380px; background: var(--panel); border-radius: 14px; padding: 26px 28px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.login-brand { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+.login-title { font-size: 22px; font-weight: 700; }
+button.wide { width: 100%; margin-top: 14px; padding: 10px; justify-content: center; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.login-error { margin-top: 14px; padding: 9px 12px; border-radius: 8px; background: rgba(214,69,69,.12); color: var(--err); font-size: 13.5px; }
+.small { font-size: 12.5px; }
+[hidden] { display: none !important; }
+.user-box { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #262d3c; }
+.user-box .name { color: #fff; font-weight: 600; }
+.user-box a { color: #a9b3c7; cursor: pointer; text-decoration: underline; }
+.container-row { display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
+.dot.on { background: var(--ok); }

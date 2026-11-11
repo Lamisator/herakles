@@ -45,6 +45,11 @@ type Options struct {
 	// buffer (tray mode). If nil, the GUI uses its own and discards logs.
 	Runner *daemon.Runner
 	Logs   *daemon.LogBuffer
+	// Web serves the GUI on the network with user accounts instead of the
+	// local session token.
+	Web *WebOptions
+	// TLSCert and TLSKey make the web mode serve HTTPS itself.
+	TLSCert, TLSKey string
 }
 
 // Server is the GUI backend.
@@ -55,14 +60,16 @@ type Server struct {
 	token   string
 	version string
 	ctx     context.Context
+	web     *webAuth
 }
 
 // NewServer creates the GUI backend.
 func NewServer(ctx context.Context, eng *engine.Engine, version string) *Server {
-	return newServer(ctx, eng, Options{Version: version})
+	s, _ := newServer(ctx, eng, Options{Version: version})
+	return s
 }
 
-func newServer(ctx context.Context, eng *engine.Engine, opts Options) *Server {
+func newServer(ctx context.Context, eng *engine.Engine, opts Options) (*Server, error) {
 	tok := make([]byte, 24)
 	_, _ = rand.Read(tok)
 	logs := opts.Logs
@@ -75,7 +82,18 @@ func newServer(ctx context.Context, eng *engine.Engine, opts Options) *Server {
 		runner = daemon.NewRunner(ctx, eng, 2)
 	}
 	eng.Prompt = nil
-	return &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx}
+	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx}
+	if opts.Web != nil {
+		if opts.Web.Log == nil {
+			opts.Web.Log = eng.Log
+		}
+		wa, err := newWebAuth(*opts.Web)
+		if err != nil {
+			return nil, err
+		}
+		s.web = wa
+	}
+	return s, nil
 }
 
 // Token returns the session token.
@@ -124,6 +142,24 @@ func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, er
 	if err != nil {
 		return nil, err
 	}
+	if opts.Web != nil {
+		// Network mode: logins protect it; no fallback port.
+		s, err := newServer(ctx, eng, opts)
+		if err != nil {
+			return nil, err
+		}
+		ln, err := net.Listen("tcp", opts.Listen)
+		if err != nil {
+			return nil, fmt.Errorf("web interface: %w", err)
+		}
+		srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		if opts.TLSCert != "" {
+			go func() { _ = srv.ServeTLS(ln, opts.TLSCert, opts.TLSKey) }()
+		} else {
+			go func() { _ = srv.Serve(ln) }()
+		}
+		return &Instance{URL: opts.Web.URL, srv: srv}, nil
+	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, fmt.Errorf("the GUI only listens on loopback addresses (got %s)", opts.Listen)
 	}
@@ -135,7 +171,11 @@ func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, er
 			return nil, err
 		}
 	}
-	s := newServer(ctx, eng, opts)
+	s, err := newServer(ctx, eng, opts)
+	if err != nil {
+		ln.Close()
+		return nil, err
+	}
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	return &Instance{URL: fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), s.token), srv: srv}, nil
@@ -217,7 +257,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /", files)
 
 	mux.HandleFunc("GET /api/info", s.info)
-	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.eng.Config()) })
+	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+		if u := userOf(r); u != nil && !u.IsAdmin() {
+			writeJSON(w, 200, redactedConfig(s.eng.Config()))
+			return
+		}
+		writeJSON(w, 200, s.eng.Config())
+	})
 	mux.HandleFunc("PUT /api/config", s.putConfig)
 	mux.HandleFunc("GET /api/config/yaml", s.getYAML)
 	mux.HandleFunc("PUT /api/config/yaml", s.putYAML)
@@ -251,6 +297,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/download", s.download)
 	mux.HandleFunc("POST /api/repos/{name}/snapshots/{id}/restore", s.restore)
 	mux.HandleFunc("GET /api/repos/{name}/diff", s.diff)
+	s.dockerRoutes(mux)
+	if s.web != nil {
+		s.web.routes(mux)
+		return s.web.guard(mux)
+	}
 	return s.guard(mux)
 }
 
@@ -309,7 +360,11 @@ func (s *Server) guard(next http.Handler) http.Handler {
 
 func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 	host, _ := os.Hostname()
-	out := map[string]any{"version": s.version, "config_path": s.eng.Config().Path(), "hostname": host, "os": runtime.GOOS}
+	out := map[string]any{"version": s.version, "config_path": s.eng.Config().Path(), "hostname": host, "os": runtime.GOOS, "mode": "local"}
+	if u := userOf(r); u != nil {
+		out["mode"] = "web"
+		out["user"] = viewOf(u)
+	}
 	if cl, err := daemon.NewClient(s.eng.Config()); err == nil {
 		if st, err := cl.Status(); err == nil {
 			out["daemon"] = st

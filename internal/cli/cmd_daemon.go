@@ -17,6 +17,7 @@ import (
 
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/daemon"
+	"github.com/lamisator/herakles/internal/gui"
 	"github.com/lamisator/herakles/internal/server"
 	"github.com/lamisator/herakles/internal/ui"
 )
@@ -243,6 +244,17 @@ func (a *App) runDaemon(ctx context.Context) error {
 		return err
 	}
 	defer closer.Close()
+	if a.cfg.Web.Listen != "" {
+		if err := d.Listen(); err != nil {
+			return err
+		}
+		inst, err := gui.Start(ctx, a.eng, a.webOptions(d))
+		if err != nil {
+			return err
+		}
+		defer inst.Shutdown()
+		a.eng.Log.Info("web interface started", "listen", a.cfg.Web.Listen, "url", a.cfg.Web.URL)
+	}
 	return d.Run(ctx)
 }
 

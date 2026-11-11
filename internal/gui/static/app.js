@@ -103,6 +103,9 @@ async function api(method, path, body, retried) {
     const ok = await askPassword(data.repo, data.error);
     if (ok) return api(method, path, body, true);
   }
+  if (res.status === 401 && !(data && data.needs_password) && state.info && state.info.mode === 'web') {
+    location.href = '/login.html?next=' + encodeURIComponent(location.pathname);
+  }
   throw new Error((data && data.error) || res.statusText);
 }
 async function askPassword(repo, why) {
@@ -171,7 +174,7 @@ views.dashboard = async main => {
       jobsEl.append(h('div', { class: 'card' },
         h('h3', {}, j.name, run ? badge('running') : badge(last && last.status), j.disabled ? h('span', { class: 'chip' }, 'disabled') : null),
         j.description ? h('div', { class: 'meta' }, j.description) : null,
-        h('div', { class: 'meta' }, '→ ', j.repository, ' · ', [...(j.paths || []), ...(j.devices || [])].join(', ')),
+        h('div', { class: 'meta' }, '→ ', j.repository, ' · ', [...(j.docker ? ['Docker projects'] : []), ...(j.paths || []), ...(j.devices || [])].join(', ')),
         h('div', { class: 'meta' }, 'Last run: ', last ? ago(last.start) + ' (' + last.type + ')' : 'never',
           last && last.summary ? ' · ' + fmtBytes(last.summary.total_bytes) + ', ' + fmtBytes(last.summary.bytes_stored) + ' stored' : ''),
         last && last.error ? h('div', { class: 'meta', style: 'color:var(--err)' }, last.error) : null,
@@ -229,7 +232,8 @@ views.snapshots = async main => {
   if (!state.snapRepo || !repos.find(r => r.name === state.snapRepo)) state.snapRepo = repos[0].name;
   const sel = h('select', { style: 'width:auto', onchange: e => { state.snapRepo = e.target.value; load(); } },
     repos.map(r => h('option', { value: r.name, selected: r.name === state.snapRepo }, r.name)));
-  const jobFilter = h('input', { placeholder: 'filter (job, host, tag, id)…', style: 'width:240px', oninput: () => renderTable() });
+  const jobFilter = h('input', { placeholder: 'filter (job, host, tag, id)…', style: 'width:240px', value: state.snapFilter || '', oninput: () => renderTable() });
+  state.snapFilter = '';
   const diffBtn = h('button', { disabled: true, onclick: () => diffSelected() }, 'Compare selected');
   const tableBox = h('div');
   const browser = h('div');
@@ -378,6 +382,13 @@ async function editJob(name) {
     hooksBefore: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.before)), hooksAfter: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.after)),
     hooksFail: h('textarea', { rows: 2 }, lines(j.hooks && j.hooks.on_failure)),
     retryAttempts: h('input', { type: 'number', min: 0, value: (j.retry && j.retry.attempts) || 0 }), retryDelay: h('input', { value: (j.retry && j.retry.delay) || '', placeholder: '10m' }),
+    docker: h('input', { type: 'checkbox', checked: !!j.docker }),
+    dProjects: h('input', { value: ((j.docker && j.docker.projects) || []).join(', '), placeholder: 'all (or e.g. shop, wiki-*)' }),
+    dExclude: h('input', { value: ((j.docker && j.docker.exclude_projects) || []).join(', '), placeholder: 'e.g. portainer' }),
+    dStop: h('input', { value: ((j.docker && j.docker.stop) || []).join(', '), placeholder: 'none (or e.g. zammad)' }),
+    dScan: h('input', { value: ((j.docker && j.docker.scan_dirs) || []).join(', '), placeholder: 'e.g. /srv/docker' }),
+    dSkipDumps: h('input', { type: 'checkbox', checked: j.docker && j.docker.skip_dumps }),
+    dSkipStandalone: h('input', { type: 'checkbox', checked: j.docker && j.docker.skip_standalone }),
   };
   const ret = {};
   for (const k of ['keep_last', 'keep_hourly', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly', 'keep_full'])
@@ -412,6 +423,12 @@ async function editJob(name) {
     h('label', {}, 'Description'), f.description,
     h('fieldset', {}, h('legend', {}, 'Sources'),
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Paths (one per line)'), f.paths), h('div', {}, h('label', {}, 'Disks / partitions as raw images (one per line)'), f.devices))),
+    h('fieldset', {}, h('legend', {}, 'Docker'),
+      h('label', { class: 'check' }, f.docker, 'Back up Docker Compose projects, each as its own snapshot (directory, bind mounts, volumes, database dumps)'),
+      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Projects (comma separated globs)'), f.dProjects), h('div', {}, h('label', {}, 'Except'), f.dExclude)),
+      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Stop during backup (instead of dumps)'), f.dStop), h('div', {}, h('label', {}, 'Also find project directories in'), f.dScan)),
+      h('label', { class: 'check' }, f.dSkipDumps, 'Do not dump databases'),
+      h('label', { class: 'check' }, f.dSkipStandalone, 'Ignore containers that are not part of a Compose project')),
     h('fieldset', {}, h('legend', {}, 'Exclusions'),
       h('label', {}, 'Exclude patterns (one per line; *.tmp, **/cache, /abs/path)'), f.exclude,
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Skip dirs containing'), f.excludeIfPresent), h('div', {}, h('label', {}, 'Skip files larger than'), f.excludeLarger)),
@@ -452,6 +469,9 @@ async function editJob(name) {
       for (const k of ['keep_within', 'keep_within_daily', 'keep_within_weekly', 'keep_within_monthly']) nr[k] = ret[k].value.trim() || '0';
       for (const k of ['keep_within_hourly', 'keep_within_yearly']) nr[k] = r[k] || '0';
       nj.retention = nr;
+      const csv = el => el.value.split(',').map(x => x.trim()).filter(Boolean);
+      nj.docker = f.docker.checked ? Object.assign({}, j.docker || {}, { projects: csv(f.dProjects), exclude_projects: csv(f.dExclude),
+        stop: csv(f.dStop), scan_dirs: csv(f.dScan), skip_dumps: f.dSkipDumps.checked, skip_standalone: f.dSkipStandalone.checked }) : null;
       const c = await loadConfig();
       c.jobs = c.jobs || [];
       const i = orig ? c.jobs.findIndex(x => x.name === orig.name) : -1;
@@ -655,4 +675,215 @@ views.logs = async main => {
   state.timer = setInterval(() => render().catch(() => {}), 3000);
 };
 
-navigate('dashboard');
+// ---------- containers (Docker projects) ----------
+views.containers = async main => {
+  main.append(h('h1', {}, 'Containers'), h('div', { class: 'sub' },
+    'Docker Compose projects and containers. Each one is backed up as its own snapshot (directory, bind mounts, volumes and database dumps) and can be restored on its own.'));
+  const box = h('div');
+  main.append(box);
+  const render = async () => {
+    const [jobs, runs] = await Promise.all([api('GET', '/api/docker'), api('GET', '/api/runs')]);
+    const active = {};
+    runs.active.forEach(r => { active[r.kind + ':' + r.target] = r; });
+    clear(box);
+    if (!jobs.length) {
+      box.append(h('div', { class: 'empty' }, 'No backup job has a Docker section yet. ',
+        isAdmin() ? h('button', { class: 'primary', onclick: () => navigate('jobs') }, 'Create one under Backup Jobs') : 'Ask an administrator to set one up.'));
+      return;
+    }
+    for (const j of jobs) {
+      box.append(h('h2', {}, 'Job ', j.job, h('span', { class: 'muted', style: 'font-weight:400;font-size:14px' }, ' → ' + j.repository)));
+      if (j.error) { box.append(h('div', { class: 'empty' }, j.error)); continue; }
+      const grid = h('div', { class: 'grid' });
+      box.append(grid);
+      for (const p of j.projects) {
+        const unit = j.job + '/' + p.name;
+        const run = active['backup:' + unit] || active['restore:' + unit] || active['backup:' + j.job];
+        const last = p.last;
+        const res = p.result;
+        grid.append(h('div', { class: 'card' },
+          h('h3', {}, p.name, p.standalone ? h('span', { class: 'chip' }, 'standalone') : null,
+            run ? badge('running') : badge(res ? res.status : (last ? 'success' : null))),
+          p.working_dir ? h('div', { class: 'meta mono' }, p.working_dir) : null,
+          h('div', {}, (p.containers || []).map(c => h('div', { class: 'container-row' }, h('span', { class: 'dot' + (c.running ? ' on' : '') }), c.name, ' · ', c.image))),
+          !p.containers.length ? h('div', { class: 'meta' }, 'no containers (project directory only)') : null,
+          h('div', { class: 'meta' }, (p.databases && p.databases.length ? 'Databases: ' + p.databases.join(', ') + ' · ' : '') +
+            { dump: 'dumped while running', stop: 'stopped during backup', files: 'files only' }[p.mode]),
+          h('div', { class: 'meta' }, 'Last backup: ', last ? ago(last.time) + ' (' + last.type + (last.summary ? ', ' + fmtBytes(last.summary.total_bytes) : '') + ') · ' + p.snapshots + ' snapshots' : 'never'),
+          res && res.error ? h('div', { class: 'meta', style: 'color:var(--err)' }, res.error) : null,
+          run ? [h('div', { class: 'meta' }, run.kind === 'restore' ? 'Restoring: ' + (run.message || 'queued…') : (run.state === 'queued' ? 'queued…' : progressText(run.progress))),
+            run.kind === 'backup' ? progressBar(run.progress) : h('div', { class: 'progress indet' }, h('div'))] : null,
+          h('div', { class: 'actions' },
+            h('button', { class: 'primary', disabled: !!run, onclick: () => dockerBackup(j.job, p.name) }, 'Back up now'),
+            h('button', { disabled: !!run || !p.snapshots, onclick: () => dockerRestore(j.job, p) }, 'Restore…'),
+            h('span', { class: 'spacer' }),
+            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapFilter = unit; navigate('snapshots'); } }, 'Browse'))));
+      }
+    }
+  };
+  await render();
+  state.timer = setInterval(() => render().catch(() => {}), 3000);
+};
+
+async function dockerBackup(job, project) {
+  try { await api('POST', '/api/docker/' + encodeURIComponent(job) + '/' + encodeURIComponent(project) + '/backup', { type: 'auto' }); toast('Backing up ' + project); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function dockerRestore(job, p) {
+  const base = '/api/docker/' + encodeURIComponent(job) + '/' + encodeURIComponent(p.name);
+  const snaps = await api('GET', base + '/snapshots');
+  const sel = h('select', {}, snaps.map((s, i) => h('option', { value: s.id }, fmtTime(s.time) + ' · ' + s.type + (s.stopped ? ' · stopped' : '') +
+    (s.dumps ? ' · ' + s.dumps.length + ' dumps' : '') + (i === 0 ? ' (latest)' : ''))));
+  const db = h('select', {},
+    h('option', { value: 'auto' }, 'Automatic: load dumps (or files for stopped snapshots)'),
+    h('option', { value: 'dumps' }, 'Fresh databases, then load the dumps'),
+    h('option', { value: 'files' }, 'Restore the raw database files'));
+  const keep = h('input', { type: 'checkbox' });
+  const confirm = h('input', { placeholder: p.name, autocomplete: 'off' });
+  const info = h('div', { class: 'meta' });
+  const showInfo = () => {
+    const s = snaps.find(x => x.id === sel.value);
+    clear(info).append(s && s.dumps ? 'Dumps: ' + s.dumps.join(', ') : 'No database dumps in this snapshot.',
+      s && s.failed_dumps ? h('div', { style: 'color:var(--err)' }, 'Failed dumps: ' + s.failed_dumps.join('; ')) : null);
+  };
+  sel.addEventListener('change', showInfo);
+  showInfo();
+  const ok = await modal('Restore ' + p.name, [
+    h('p', {}, 'This stops ', h('b', {}, p.name), ', replaces its data with the snapshot and starts it again:'),
+    h('ul', { class: 'mono', style: 'font-size:12px' }, (p.paths || []).map(x => h('li', {}, x))),
+    h('label', {}, 'Snapshot'), sel, info,
+    h('label', {}, 'Databases'), db,
+    h('label', { class: 'check' }, keep, 'Keep the replaced data next to it (PATH.herakles-old-TIME)'),
+    h('p', { class: 'muted' }, 'If something fails before the project runs again, the previous data is put back automatically.'),
+    h('label', {}, 'Type the project name to confirm'), confirm], [
+    { label: 'Cancel', value: false },
+    { label: 'Restore', class: 'danger solid', action: async () => {
+      if (confirm.value.trim() !== p.name) { toast('Type ' + p.name + ' to confirm', true); return false; }
+      await api('POST', base + '/restore', { snapshot: sel.value, databases: db.value, keep_old: keep.checked, confirm: confirm.value.trim() });
+      return true;
+    } }]);
+  if (ok) toast('Restoring ' + p.name + ' — progress is shown on its card');
+}
+
+// ---------- account & users (web mode) ----------
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function fromB64url(s) {
+  const b = atob((s + '==='.slice((s.length + 3) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(b, c => c.charCodeAt(0)).buffer;
+}
+function isAdmin() { return !state.info || state.info.mode !== 'web' || (state.info.user && state.info.user.role === 'admin'); }
+
+async function addPasskey() {
+  const nameInput = h('input', { value: guessDevice(), placeholder: 'e.g. MacBook, iPhone, YubiKey' });
+  const name = await modal('Add a passkey', [h('p', { class: 'muted' }, 'Give it a name so you can tell your passkeys apart.'), h('label', {}, 'Name'), nameInput],
+    [{ label: 'Cancel', value: null }, { label: 'Continue', class: 'primary', action: () => nameInput.value.trim() || 'Passkey' }], 'small');
+  if (!name) return false;
+  const opts = await api('POST', '/api/account/passkeys/begin');
+  const pk = opts.publicKey;
+  pk.challenge = fromB64url(pk.challenge);
+  pk.user.id = fromB64url(pk.user.id);
+  (pk.excludeCredentials || []).forEach(c => { c.id = fromB64url(c.id); });
+  let cred;
+  try { cred = await navigator.credentials.create({ publicKey: pk }); }
+  catch (e) { if (e.name === 'InvalidStateError') toast('This authenticator already has a passkey for your account', true); else if (e.name !== 'NotAllowedError') toast(e.message, true); return false; }
+  const r = cred.response;
+  await api('POST', '/api/account/passkeys/finish?name=' + encodeURIComponent(name), {
+    id: cred.id, rawId: b64url(cred.rawId), type: cred.type,
+    response: { clientDataJSON: b64url(r.clientDataJSON), attestationObject: b64url(r.attestationObject), transports: r.getTransports ? r.getTransports() : [] },
+  });
+  toast('Passkey added');
+  return true;
+}
+function guessDevice() {
+  const ua = navigator.userAgent;
+  return /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows PC' : /Linux/.test(ua) ? 'Linux PC' : 'Passkey';
+}
+
+views.account = async main => {
+  const me = await api('GET', '/api/account');
+  main.append(h('h1', {}, 'Account'), h('div', { class: 'sub' }, 'Signed in as ', h('b', {}, me.name), ' (' + me.role + ')'));
+  const cur = h('input', { type: 'password', autocomplete: 'current-password' });
+  const pw1 = h('input', { type: 'password', autocomplete: 'new-password' });
+  const pw2 = h('input', { type: 'password', autocomplete: 'new-password' });
+  main.append(h('div', { class: 'grid' },
+    h('div', { class: 'card' }, h('h3', {}, 'Passkeys'),
+      h('div', { class: 'meta' }, 'Sign in with Face ID, Touch ID, Windows Hello, your phone, a password manager or a security key.'),
+      me.passkeys.length ? h('table', { style: 'margin-top:10px' }, me.passkeys.map(p => h('tr', {},
+        h('td', {}, h('b', {}, p.name), h('div', { class: 'meta' }, 'added ' + ago(p.created) + (p.last_used ? ' · used ' + ago(p.last_used) : ''))),
+        h('td', { style: 'text-align:right' }, h('button', { class: 'small danger', onclick: async () => {
+          if (!await confirmDlg('Remove passkey', 'Remove the passkey "' + p.name + '"?', true)) return;
+          try { await api('DELETE', '/api/account/passkeys/' + encodeURIComponent(p.id)); navigate('account'); } catch (e) { toast(e.message, true); }
+        } }, 'Remove')))))
+        : h('p', { class: 'muted' }, 'No passkeys yet.'),
+      h('div', { class: 'actions' }, window.PublicKeyCredential
+        ? h('button', { class: 'primary', onclick: async () => { try { if (await addPasskey()) navigate('account'); } catch (e) { toast(e.message, true); } } }, 'Add a passkey')
+        : h('span', { class: 'muted' }, 'This browser does not support passkeys.'))),
+    h('div', { class: 'card' }, h('h3', {}, me.has_password ? 'Change password' : 'Set a password'),
+      me.has_password ? [h('label', {}, 'Current password'), cur] : null,
+      h('label', {}, 'New password (at least 10 characters)'), pw1, h('label', {}, 'Repeat'), pw2,
+      h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: async () => {
+        if (pw1.value !== pw2.value) return toast('The passwords do not match', true);
+        try { await api('POST', '/api/account/password', { current: cur.value, new: pw1.value }); toast('Password changed; other sessions were signed out'); navigate('account'); }
+        catch (e) { toast(e.message, true); }
+      } }, 'Save')))));
+};
+
+views.users = async main => {
+  const users = await api('GET', '/api/users');
+  main.append(h('h1', {}, 'Users'), h('div', { class: 'sub' }, 'Accounts of the web interface. There is no public sign-up; new users get an initial password and can add passkeys themselves. Users can run backups, browse and restore; administrators can also change the configuration, repositories and users.'),
+    h('div', { class: 'toolbar' }, h('button', { class: 'primary', onclick: () => editUser() }, '+ New user')),
+    h('table', {}, h('tr', {}, ['User', 'Role', 'Sign-in', 'Last login', 'State', ''].map(t => h('th', {}, t))),
+      users.map(u => h('tr', {},
+        h('td', {}, h('b', {}, u.name)), h('td', {}, u.role),
+        h('td', {}, [u.has_password ? 'password' : null, u.passkeys.length ? u.passkeys.length + ' passkey' + (u.passkeys.length > 1 ? 's' : '') : null].filter(Boolean).join(' + ') || '-'),
+        h('td', {}, u.last_login ? ago(u.last_login) : 'never'), h('td', {}, u.disabled ? badge('failure') : 'active'),
+        h('td', { style: 'text-align:right' }, h('button', { class: 'small', onclick: () => editUser(u) }, 'Edit'), ' ',
+          state.info.user.id !== u.id ? h('button', { class: 'small danger', onclick: async () => {
+            if (!await confirmDlg('Delete user', 'Delete the account ' + u.name + '?', true)) return;
+            try { await api('DELETE', '/api/users/' + u.id); navigate('users'); } catch (e) { toast(e.message, true); }
+          } }, 'Delete') : null)))));
+};
+
+async function editUser(u) {
+  const name = h('input', { value: u ? u.name : '', disabled: !!u, autocomplete: 'off' });
+  const role = h('select', {}, h('option', { value: 'user', selected: u && u.role === 'user' }, 'User (backups, browse, restore)'),
+    h('option', { value: 'admin', selected: u && u.role === 'admin' }, 'Administrator (everything)'));
+  const pw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: u ? 'leave empty to keep' : 'at least 10 characters' });
+  const disabled = h('input', { type: 'checkbox', checked: u && u.disabled });
+  const reset = h('input', { type: 'checkbox' });
+  await modal(u ? 'Edit ' + u.name : 'New user', [
+    h('label', {}, 'User name'), name, h('label', {}, 'Role'), role,
+    h('label', {}, u ? 'New password' : 'Initial password'), pw,
+    u ? [h('label', { class: 'check' }, disabled, 'Disabled (cannot sign in)'),
+      u.passkeys.length ? h('label', { class: 'check' }, reset, 'Remove all ' + u.passkeys.length + ' passkeys') : null] : null], [
+    { label: 'Cancel' },
+    { label: 'Save', class: 'primary', action: async () => {
+      if (!u) await api('POST', '/api/users', { name: name.value.trim(), role: role.value, password: pw.value });
+      else {
+        const body = { role: role.value, disabled: disabled.checked, reset_passkeys: reset.checked };
+        if (pw.value) body.password = pw.value;
+        await api('PATCH', '/api/users/' + u.id, body);
+      }
+      navigate('users');
+    } }]);
+}
+
+function renderUser(info) {
+  const box = clear($('#user-box'));
+  if (info.mode !== 'web' || !info.user) { box.hidden = true; return; }
+  box.hidden = false;
+  box.append(h('div', {}, 'Signed in as ', h('span', { class: 'name' }, info.user.name)),
+    h('div', {}, h('a', { onclick: () => navigate('account') }, 'Account'), ' · ',
+      h('a', { onclick: async () => { await api('POST', '/auth/logout'); location.href = '/login.html'; } }, 'Sign out')));
+}
+
+async function boot() {
+  try { state.info = await api('GET', '/api/info'); } catch (e) { state.info = null; }
+  const web = state.info && state.info.mode === 'web';
+  document.querySelectorAll('#nav [data-web]').forEach(a => { a.hidden = !web; });
+  document.querySelectorAll('#nav [data-admin]').forEach(a => { a.hidden = a.hidden || !isAdmin(); });
+  if (state.info) renderUser(state.info);
+  navigate('dashboard');
+}
+boot();

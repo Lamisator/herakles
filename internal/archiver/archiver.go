@@ -47,6 +47,8 @@ type Options struct {
 	OnError func(path string, err error)
 	// Time overrides the snapshot time (tests).
 	Time time.Time
+	// Docker is stored in the snapshot of a Docker project.
+	Docker *repository.DockerInfo
 }
 
 // Archiver performs one backup.
@@ -287,7 +289,7 @@ func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 	sum := a.summary
 	snap := &repository.Snapshot{
 		Time: snapTime.UTC(), Tree: treeID, Paths: paths, Hostname: a.opts.Hostname, Username: uname,
-		Tags: a.opts.Tags, Job: a.opts.Job, Type: a.opts.Type, Version: Version, Summary: &sum,
+		Tags: a.opts.Tags, Job: a.opts.Job, Type: a.opts.Type, Version: Version, Summary: &sum, Docker: a.opts.Docker,
 	}
 	if a.opts.Parent != nil && a.opts.Type != repository.TypeFull {
 		p := a.opts.Parent.ID()

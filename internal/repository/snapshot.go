@@ -51,8 +51,46 @@ type Snapshot struct {
 	Original *id.ID    `json:"original,omitempty"`
 	Version  string    `json:"program_version,omitempty"`
 	Summary  *Summary  `json:"summary,omitempty"`
+	// Docker is set on snapshots of a Docker project.
+	Docker *DockerInfo `json:"docker,omitempty"`
 
 	id id.ID
+}
+
+// DockerInfo describes the Docker project a snapshot belongs to and where
+// its data lives on the host.
+type DockerInfo struct {
+	Project     string            `json:"project"`
+	Standalone  bool              `json:"standalone,omitempty"`
+	WorkingDir  string            `json:"working_dir,omitempty"`
+	ConfigFiles []string          `json:"config_files,omitempty"`
+	Volumes     map[string]string `json:"volumes,omitempty"` // volume name -> host directory
+	Binds       []string          `json:"binds,omitempty"`   // bind mounts outside the project directory
+	// MetaDir holds the database dumps and docker inspect output.
+	MetaDir string `json:"meta_dir,omitempty"`
+	// Stopped means the project was stopped during the backup, so its
+	// files (including database files) are consistent.
+	Stopped    bool              `json:"stopped,omitempty"`
+	Dumps      []DockerDump      `json:"dumps,omitempty"`
+	Containers []DockerContainer `json:"containers,omitempty"`
+}
+
+// DockerDump is a database dump stored in DockerInfo.MetaDir.
+type DockerDump struct {
+	Container string `json:"container"`
+	Service   string `json:"service,omitempty"`
+	Kind      string `json:"kind"`               // postgres, mysql, mongo
+	File      string `json:"file,omitempty"`     // file name in MetaDir
+	DataDir   string `json:"data_dir,omitempty"` // host directory of the database files
+	Error     string `json:"error,omitempty"`
+}
+
+// DockerContainer is a container of a project at backup time.
+type DockerContainer struct {
+	Name    string `json:"name"`
+	Service string `json:"service,omitempty"`
+	Image   string `json:"image"`
+	Running bool   `json:"running"`
 }
 
 // ID returns the snapshot ID (its file name).

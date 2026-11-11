@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -31,6 +33,7 @@ type Config struct {
 	Daemon        Daemon          `yaml:"daemon,omitempty" json:"daemon"`
 	GUI           GUI             `yaml:"gui,omitempty" json:"gui"`
 	Tray          Tray            `yaml:"tray,omitempty" json:"tray"`
+	Web           Web             `yaml:"web,omitempty" json:"web"`
 	Server        Server          `yaml:"server,omitempty" json:"server"`
 	Notifications []*Notification `yaml:"notifications,omitempty" json:"notifications"`
 	// StateDir stores run history, logs and the daemon token.
@@ -162,6 +165,60 @@ type Job struct {
 	CatchUp     bool  `yaml:"catch_up,omitempty" json:"catch_up,omitempty"`
 	LowPriority bool  `yaml:"low_priority,omitempty" json:"low_priority,omitempty"`
 	FileWorkers int   `yaml:"file_workers,omitempty" json:"file_workers,omitempty"`
+	// Docker makes the job back up Docker Compose projects (and standalone
+	// containers), each as its own snapshot named "<job>/<project>".
+	Docker *DockerJob `yaml:"docker,omitempty" json:"docker,omitempty"`
+}
+
+// DockerJob selects the containers a job backs up and how.
+type DockerJob struct {
+	// Projects are glob patterns of project names; empty means all.
+	Projects        []string `yaml:"projects,omitempty" json:"projects,omitempty"`
+	ExcludeProjects []string `yaml:"exclude_projects,omitempty" json:"exclude_projects,omitempty"`
+	// ScanDirs are searched for project directories (subdirectories with a
+	// compose file) that have no containers, e.g. /srv/docker.
+	ScanDirs []string `yaml:"scan_dirs,omitempty" json:"scan_dirs,omitempty"`
+	// Stop lists projects (globs) that are stopped during their backup for
+	// fully consistent files, instead of dumping their databases.
+	Stop []string `yaml:"stop,omitempty" json:"stop,omitempty"`
+	// SkipDumps disables database dumps (Postgres, MySQL/MariaDB, MongoDB).
+	SkipDumps      bool `yaml:"skip_dumps,omitempty" json:"skip_dumps,omitempty"`
+	SkipVolumes    bool `yaml:"skip_volumes,omitempty" json:"skip_volumes,omitempty"`
+	SkipBindMounts bool `yaml:"skip_bind_mounts,omitempty" json:"skip_bind_mounts,omitempty"`
+	// SkipStandalone ignores containers that are not part of a Compose project.
+	SkipStandalone bool `yaml:"skip_standalone,omitempty" json:"skip_standalone,omitempty"`
+	// Binary is the docker executable (default "docker").
+	Binary string `yaml:"binary,omitempty" json:"binary,omitempty"`
+}
+
+// Selects reports whether the job backs up the named project.
+func (d *DockerJob) Selects(name string) bool {
+	if d == nil {
+		return false
+	}
+	if len(d.Projects) > 0 && !globMatch(d.Projects, name) {
+		return false
+	}
+	return !globMatch(d.ExcludeProjects, name)
+}
+
+// Stops reports whether the project is stopped during its backup.
+func (d *DockerJob) Stops(name string) bool { return d != nil && globMatch(d.Stop, name) }
+
+func globMatch(patterns []string, name string) bool {
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// SplitUnit splits "job/project" into its parts; project is "" for a plain
+// job name.
+func SplitUnit(name string) (job, project string) {
+	job, project, _ = strings.Cut(name, "/")
+	return job, project
 }
 
 // Daemon configures the background service.
@@ -192,6 +249,25 @@ type Tray struct {
 
 // IsZero lets yaml omit empty sections.
 func (t Tray) IsZero() bool { return t == Tray{} }
+
+// Web serves the GUI on the network with user accounts (password and
+// passkey logins). The daemon serves it when Listen is set.
+type Web struct {
+	// Listen is the address to serve on, e.g. 127.0.0.1:7480 behind a
+	// reverse proxy that terminates TLS.
+	Listen string `yaml:"listen,omitempty" json:"listen,omitempty"`
+	// URL is the public address, e.g. https://backup.example.com. Passkeys
+	// are bound to its host name.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+	// TLSCert and TLSKey make the daemon serve HTTPS itself.
+	TLSCert string `yaml:"tls_cert,omitempty" json:"tls_cert,omitempty"`
+	TLSKey  string `yaml:"tls_key,omitempty" json:"tls_key,omitempty"`
+	// SessionHours is how long a login lasts (default 12).
+	SessionHours int `yaml:"session_hours,omitempty" json:"session_hours,omitempty"`
+}
+
+// IsZero lets yaml omit empty sections.
+func (w Web) IsZero() bool { return w == Web{} }
 
 // Server configures the repository server.
 type Server struct {
@@ -517,6 +593,14 @@ func (c *Config) Validate() error {
 			add("repository %q: check_read_data: %v", r.Name, err)
 		}
 	}
+	if c.Web.Listen != "" {
+		if u, err := url.Parse(c.Web.URL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			add("web.url must be the public http(s) address of the web interface, e.g. https://backup.example.com")
+		}
+		if (c.Web.TLSCert == "") != (c.Web.TLSKey == "") {
+			add("web: tls_cert and tls_key go together")
+		}
+	}
 	jobNames := map[string]bool{}
 	for i, j := range c.Jobs {
 		if j == nil {
@@ -532,8 +616,18 @@ func (c *Config) Validate() error {
 		if !repoNames[j.Repository] {
 			add("job %q: unknown repository %q", j.Name, j.Repository)
 		}
-		if len(j.Paths) == 0 && len(j.Devices) == 0 {
-			add("job %q: needs at least one path or device", j.Name)
+		if strings.Contains(j.Name, "/") {
+			add("job %q: names must not contain /", j.Name)
+		}
+		if len(j.Paths) == 0 && len(j.Devices) == 0 && j.Docker == nil {
+			add("job %q: needs at least one path, device or a docker section", j.Name)
+		}
+		if j.Docker != nil {
+			for _, p := range append(append(append([]string{}, j.Docker.Projects...), j.Docker.ExcludeProjects...), j.Docker.Stop...) {
+				if _, err := path.Match(p, ""); err != nil {
+					add("job %q: docker: invalid pattern %q", j.Name, p)
+				}
+			}
 		}
 		if _, err := ParseSize(j.ExcludeLargerThan); err != nil {
 			add("job %q: exclude_larger_than: %v", j.Name, err)

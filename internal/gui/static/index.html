@@ -16,13 +16,16 @@
     </div>
     <nav id="nav">
       <a data-view="dashboard" class="active">Dashboard</a>
+      <a data-view="containers">Containers</a>
       <a data-view="snapshots">Snapshots &amp; Restore</a>
-      <a data-view="jobs">Backup Jobs</a>
-      <a data-view="repos">Repositories</a>
-      <a data-view="settings">Configuration</a>
+      <a data-view="jobs" data-admin>Backup Jobs</a>
+      <a data-view="repos" data-admin>Repositories</a>
+      <a data-view="settings" data-admin>Configuration</a>
       <a data-view="logs">Activity Log</a>
+      <a data-view="users" data-web data-admin hidden>Users</a>
+      <a data-view="account" data-web hidden>Account</a>
     </nav>
-    <div class="sidebar-foot" id="daemon-state"></div>
+    <div class="sidebar-foot"><div class="user-box" id="user-box" hidden></div><div id="daemon-state"></div></div>
   </aside>
   <main id="main"></main>
 </div>

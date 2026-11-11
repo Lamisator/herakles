@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in – Herakles Backup</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="login-page">
+<main class="login-card">
+  <div class="login-brand">
+    <svg viewBox="0 0 64 64" width="44" height="44" aria-hidden="true"><path d="M32 4 8 14v16c0 15 10 26 24 30 14-4 24-15 24-30V14z" fill="#d4a017"/><path d="M22 20v24M42 20v24M22 32h20" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>
+    <div><div class="login-title">Herakles</div><div class="muted" id="login-host"></div></div>
+  </div>
+
+  <form id="login" hidden>
+    <label for="name">User name</label>
+    <input id="name" autocomplete="username webauthn" autocapitalize="none" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button class="primary wide" type="submit">Sign in</button>
+    <div class="or" id="passkey-or"><span>or</span></div>
+    <button class="wide" type="button" id="passkey">Sign in with a passkey</button>
+  </form>
+
+  <form id="setup" hidden>
+    <p>Create the first administrator account. Afterwards, administrators create further accounts; there is no public sign-up.</p>
+    <label for="s-name">User name</label>
+    <input id="s-name" autocomplete="username" autocapitalize="none" required>
+    <label for="s-password">Password (at least 10 characters)</label>
+    <input id="s-password" type="password" autocomplete="new-password" minlength="10" required>
+    <label for="s-password2">Repeat password</label>
+    <input id="s-password2" type="password" autocomplete="new-password" minlength="10" required>
+    <button class="primary wide" type="submit">Create administrator</button>
+    <p class="muted small">You can add a passkey under Account after signing in.</p>
+  </form>
+
+  <div id="need-setup" hidden>
+    <p><strong>No account exists yet.</strong></p>
+    <p class="muted">Open the one-time setup link from the daemon log, or run <span class="mono">herakles web setup-link</span> on the server. Alternatively create an administrator with <span class="mono">herakles web add NAME --admin</span>.</p>
+  </div>
+
+  <div class="login-error" id="error" hidden></div>
+</main>
+<script src="login.js"></script>
+</body>
+</html>

@@ -212,6 +212,8 @@ type JobResult struct {
 	Forgotten  int                    `json:"forgotten,omitempty"`
 	Pruned     *repository.PruneStats `json:"pruned,omitempty"`
 	Trigger    string                 `json:"trigger,omitempty"`
+	// Projects holds the per-project results of a Docker job.
+	Projects []ProjectResult `json:"projects,omitempty"`
 }
 
 // RunOptions customise a job run.
@@ -221,6 +223,8 @@ type RunOptions struct {
 	Progress        *archiver.Progress
 	DryRunRetention bool
 	OnError         func(path string, err error)
+	// Projects limits a Docker job to these projects.
+	Projects []string
 }
 
 // ResolveType decides the effective backup type and parent snapshot.
@@ -271,11 +275,20 @@ func ResolveType(job *config.Job, requested string, snaps []*repository.Snapshot
 
 // RunJob runs a configured backup job, applying hooks, retention, prune,
 // history and notifications.
+//
+// For a Docker job, name may be "job/project" to back up one project.
 func (e *Engine) RunJob(ctx context.Context, name string, ro RunOptions) (*JobResult, error) {
 	cfg := e.Config()
+	name, project := config.SplitUnit(name)
 	job := cfg.Job(name)
 	if job == nil {
 		return nil, fmt.Errorf("unknown job %q", name)
+	}
+	if project != "" {
+		if job.Docker == nil {
+			return nil, fmt.Errorf("job %s has no docker section; %q is not a valid target", name, name+"/"+project)
+		}
+		ro.Projects = append(ro.Projects, project)
 	}
 	rc := cfg.Repo(job.Repository)
 	if rc == nil {
@@ -290,16 +303,19 @@ func (e *Engine) RunJob(ctx context.Context, name string, ro RunOptions) (*JobRe
 	env := []string{"HERAKLES_JOB=" + job.Name, "HERAKLES_REPOSITORY=" + rc.Name}
 
 	err := runHooks(ctx, job.Hooks, job.Hooks.Before, env, log)
-	if err != nil {
+	switch {
+	case err != nil:
 		err = fmt.Errorf("before hook: %w", err)
-	} else {
+	case job.Docker != nil:
+		err = e.runDockerBackup(ctx, job, rc, ro, res, log)
+	default:
 		err = e.runBackup(ctx, job, rc, ro, res, log)
 	}
 	res.End = time.Now()
 	switch {
 	case err != nil:
 		res.Status, res.Error = "failure", err.Error()
-	case res.Summary != nil && res.Summary.Errors > 0:
+	case res.Error != "" || (res.Summary != nil && res.Summary.Errors > 0):
 		res.Status = "warning"
 	default:
 		res.Status = "success"
@@ -342,30 +358,63 @@ func (e *Engine) runBackup(ctx context.Context, job *config.Job, rc *config.Repo
 		return err
 	}
 	defer repo.Close()
-	lock, err := repo.Lock(ctx, false, "backup "+job.Name)
+	var paths []string
+	for _, p := range job.Paths {
+		paths = append(paths, config.ExpandHome(p))
+	}
+	u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: paths, Devices: job.Devices}, ro, log)
 	if err != nil {
 		return err
+	}
+	res.Type, res.Snapshot, res.Summary, res.Forgotten = u.typ, u.snap.ID().String(), u.snap.Summary, u.forgotten
+	if u.forgotten > 0 && job.Prune && !ro.DryRunRetention {
+		st, err := e.Prune(ctx, repo, rc.Maintenance.RepackThreshold, false, nil)
+		if err != nil {
+			return fmt.Errorf("prune: %w", err)
+		}
+		res.Pruned = &st
+	}
+	return nil
+}
+
+// unit is one snapshot of a job: the job itself, or one Docker project.
+type unit struct {
+	Name    string // snapshot job name: "job" or "job/project"
+	Paths   []string
+	Devices []string
+	Docker  *repository.DockerInfo
+}
+
+type unitResult struct {
+	snap      *repository.Snapshot
+	typ       string
+	forgotten int
+}
+
+// backupUnit creates one snapshot and applies the job's retention to the
+// snapshots of the same unit.
+func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, job *config.Job, u unit, ro RunOptions, log *slog.Logger) (*unitResult, error) {
+	lock, err := repo.Lock(ctx, false, "backup "+u.Name)
+	if err != nil {
+		return nil, err
 	}
 	snaps, err := repo.Snapshots(ctx)
 	if err != nil {
 		lock.Unlock()
-		return err
+		return nil, err
 	}
 	host := job.Hostname
 	if host == "" {
 		host, _ = os.Hostname()
 	}
-	typ, parent := ResolveType(job, ro.Type, snaps, host, time.Now())
-	res.Type = typ
+	uj := *job
+	uj.Name = u.Name
+	typ, parent := ResolveType(&uj, ro.Type, snaps, host, time.Now())
 	maxSize, _ := config.ParseSize(job.ExcludeLargerThan)
-	var paths []string
-	for _, p := range job.Paths {
-		paths = append(paths, config.ExpandHome(p))
-	}
 	a, err := archiver.New(repo, archiver.Options{
-		Paths: paths, Devices: job.Devices, Excludes: job.Exclude, ExcludeIfPresent: job.ExcludeIfPresent,
+		Paths: u.Paths, Devices: u.Devices, Excludes: job.Exclude, ExcludeIfPresent: job.ExcludeIfPresent,
 		ExcludeCaches: job.ExcludeCaches, ExcludeLargerThan: maxSize, OneFileSystem: job.OneFileSystem,
-		Type: typ, Parent: parent, Job: job.Name, Hostname: host, Tags: job.Tags,
+		Type: typ, Parent: parent, Job: u.Name, Hostname: host, Tags: job.Tags, Docker: u.Docker,
 		FileWorkers: job.FileWorkers, Progress: ro.Progress,
 		OnError: func(p string, err error) {
 			log.Warn("file error", "path", p, "err", err)
@@ -376,31 +425,22 @@ func (e *Engine) runBackup(ctx context.Context, job *config.Job, rc *config.Repo
 	})
 	if err != nil {
 		lock.Unlock()
-		return err
+		return nil, err
 	}
 	snap, err := a.Run(ctx)
 	lock.Unlock()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	res.Snapshot = snap.ID().String()
-	res.Summary = snap.Summary
-
+	r := &unitResult{snap: snap, typ: typ}
 	if !job.Retention.Empty() {
-		n, err := e.ApplyRetention(ctx, repo, job.Retention, repository.SnapshotFilter{Job: job.Name, Hostname: host}, ro.DryRunRetention)
+		n, err := e.ApplyRetention(ctx, repo, job.Retention, repository.SnapshotFilter{Job: u.Name, Hostname: host}, ro.DryRunRetention)
 		if err != nil {
-			return fmt.Errorf("retention: %w", err)
+			return r, fmt.Errorf("retention: %w", err)
 		}
-		res.Forgotten = n
-		if n > 0 && job.Prune && !ro.DryRunRetention {
-			st, err := e.Prune(ctx, repo, rc.Maintenance.RepackThreshold, false, nil)
-			if err != nil {
-				return fmt.Errorf("prune: %w", err)
-			}
-			res.Pruned = &st
-		}
+		r.forgotten = n
 	}
-	return nil
+	return r, nil
 }
 
 // ApplyRetention forgets snapshots matching filter according to policy and
