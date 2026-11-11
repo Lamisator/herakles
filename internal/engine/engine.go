@@ -64,12 +64,19 @@ func (e *Engine) RememberCredentials(repo string, c crypto.Credentials) {
 	e.credMu.Unlock()
 }
 
+// ForgetCredentials drops remembered credentials of a repository.
+func (e *Engine) ForgetCredentials(repo string) {
+	e.credMu.Lock()
+	delete(e.creds, repo)
+	e.credMu.Unlock()
+}
+
 // Credentials resolves credentials for a repository.
 func (e *Engine) Credentials(rc *config.Repository) (crypto.Credentials, error) {
 	e.credMu.Lock()
 	c, ok := e.creds[rc.Name]
 	e.credMu.Unlock()
-	if ok {
+	if ok && !c.Empty() {
 		return c, nil
 	}
 	c, err := rc.Credentials()
@@ -231,7 +238,8 @@ func ResolveType(job *config.Job, requested string, snaps []*repository.Snapshot
 		return typ, latestFull
 	default:
 		if latest == nil {
-			return repository.TypeIncremental, nil
+			// Nothing to compare against: this is a full backup.
+			return repository.TypeFull, nil
 		}
 		return repository.TypeIncremental, latest
 	}

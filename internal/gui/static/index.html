@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Herakles Backup</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 8 14v16c0 15 10 26 24 30 14-4 24-15 24-30V14z' fill='%23d4a017'/%3E%3Cpath d='M22 20v24M42 20v24M22 32h20' stroke='%23fff' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><path d="M32 4 8 14v16c0 15 10 26 24 30 14-4 24-15 24-30V14z" fill="var(--accent)"/><path d="M22 20v24M42 20v24M22 32h20" stroke="#fff" stroke-width="6" stroke-linecap="round"/></svg>
+      <div><div class="brand-name">Herakles</div><div class="brand-sub" id="version"></div></div>
+    </div>
+    <nav id="nav">
+      <a data-view="dashboard" class="active">Dashboard</a>
+      <a data-view="snapshots">Snapshots &amp; Restore</a>
+      <a data-view="jobs">Backup Jobs</a>
+      <a data-view="repos">Repositories</a>
+      <a data-view="settings">Configuration</a>
+      <a data-view="logs">Activity Log</a>
+    </nav>
+    <div class="sidebar-foot" id="daemon-state"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div id="modal-root"></div>
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

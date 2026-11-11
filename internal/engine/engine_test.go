@@ -101,8 +101,8 @@ func TestResolveType(t *testing.T) {
 	if _, parent := ResolveType(job, "differential", snaps, "h", now); parent != snaps[3] {
 		t.Fatal("differential parent")
 	}
-	if typ, p := ResolveType(job, "incremental", snaps, "other-host", now); typ != "incremental" || p != nil {
-		t.Fatal("other host must not use foreign parents")
+	if typ, p := ResolveType(job, "incremental", snaps, "other-host", now); typ != "full" || p != nil {
+		t.Fatal("other host must not use foreign parents; without a parent the backup is full")
 	}
 }
 
