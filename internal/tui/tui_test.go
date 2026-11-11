@@ -55,7 +55,20 @@ func start(t *testing.T) *harness {
 	return h
 }
 
+// text returns the screen contents. tcell hands out its internal cell
+// buffer, so it is read on the UI goroutine, which is the one drawing.
 func (h *harness) text() string {
+	ch := make(chan string, 1)
+	go h.ui.app.QueueUpdate(func() { ch <- h.contents() })
+	select {
+	case s := <-ch:
+		return s
+	case <-time.After(5 * time.Second):
+		return "(UI not responding)"
+	}
+}
+
+func (h *harness) contents() string {
 	cells, w, _ := h.sim.GetContents()
 	var b strings.Builder
 	for i, c := range cells {
