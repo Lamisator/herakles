@@ -65,18 +65,18 @@ type Result struct {
 }
 
 type restorer struct {
-	repo     *repository.Repository
-	opts     Options
-	include  *archiver.Filter
-	exclude  *archiver.Filter
-	res      Result
-	mu       sync.Mutex
-	dirs     []dirMeta
-	created  map[string]bool
-	zero     sync.Map // id.ID -> bool
-	prog     *Progress
-	jobs     chan fileJob
-	wg       sync.WaitGroup
+	repo    *repository.Repository
+	opts    Options
+	include *archiver.Filter
+	exclude *archiver.Filter
+	res     Result
+	mu      sync.Mutex
+	dirs    []dirMeta
+	created map[string]bool
+	zero    sync.Map // id.ID -> bool
+	prog    *Progress
+	jobs    chan fileJob
+	wg      sync.WaitGroup
 }
 
 type dirMeta struct {

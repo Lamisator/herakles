@@ -89,8 +89,9 @@ func TestCLIWorkflow(t *testing.T) {
 	if err := json.Unmarshal([]byte(e.ok("snapshots", "--json")), &snaps); err != nil || len(snaps) != 2 {
 		t.Fatalf("snapshots json: %v %d", err, len(snaps))
 	}
-	if !strings.Contains(e.ok("diff", snaps[0].ID[:8], snaps[1].ID[:8]), "+  "+filepath.ToSlash(e.src)+"/new.txt") {
-		t.Fatal("diff misses added file")
+	diff := e.ok("diff", snaps[0].ID[:8], snaps[1].ID[:8])
+	if !strings.Contains(diff, "+  /") || !strings.Contains(diff, "/new.txt") || !strings.Contains(diff, "1 added, 0 removed, 0 modified") {
+		t.Fatalf("diff misses added file: %s", diff)
 	}
 	if !strings.Contains(e.ok("ls", "latest", e.src), "new.txt") {
 		t.Fatal("ls")

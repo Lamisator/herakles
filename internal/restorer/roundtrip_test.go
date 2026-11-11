@@ -4,17 +4,33 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"github.com/lamisator/herakles/internal/backend"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lamisator/herakles/internal/archiver"
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/restorer"
 	tu "github.com/lamisator/herakles/internal/testutil"
 )
+
+// snapRel maps an absolute path to its location inside a full restore
+// ("C:\\x" is stored as "C/x").
+func snapRel(p string) string {
+	p = filepath.ToSlash(p)
+	if len(p) >= 2 && p[1] == ':' {
+		p = p[:1] + p[2:]
+	}
+	return filepath.FromSlash(strings.TrimPrefix(p, "/"))
+}
 
 func backup(t *testing.T, repo *repository.Repository, opts archiver.Options) *repository.Snapshot {
 	t.Helper()
@@ -56,7 +72,7 @@ func TestBackupRestoreRoundtrip(t *testing.T) {
 	if _, err := restorer.Restore(ctx, repo2, snap, "/", restorer.Options{Target: dst2}); err != nil {
 		t.Fatal(err)
 	}
-	full := filepath.Join(dst2, strings.TrimPrefix(filepath.ToSlash(src), "/"))
+	full := filepath.Join(dst2, snapRel(src))
 	tu.CompareTrees(t, tu.Snapshot(t, src), tu.Snapshot(t, full))
 }
 
@@ -282,7 +298,7 @@ func TestMultipleSourcesAndOverlap(t *testing.T) {
 }
 
 func TestUnreadableFileIsReportedNotFatal(t *testing.T) {
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
 		t.Skip("root can read everything")
 	}
 	repo, _ := tu.NewRepo(t)
@@ -293,5 +309,75 @@ func TestUnreadableFileIsReportedNotFatal(t *testing.T) {
 	snap := backup(t, repo, archiver.Options{Paths: []string{src}})
 	if snap.Summary.Errors != 1 || snap.Summary.TotalFiles != 1 {
 		t.Fatalf("summary %+v", snap.Summary)
+	}
+}
+
+// failingBackend makes pack uploads fail after a few writes.
+type failingBackend struct {
+	backend.Backend
+	left atomic.Int32
+}
+
+func (f *failingBackend) Save(ctx context.Context, h backend.Handle, data []byte) error {
+	if h.Type == backend.PackFile && f.left.Add(-1) < 0 {
+		return errors.New("disk full")
+	}
+	return f.Backend.Save(ctx, h, data)
+}
+
+func TestRepositoryErrorsAbortBackup(t *testing.T) {
+	_, mem := tu.NewRepo(t)
+	fb := &failingBackend{Backend: mem}
+	fb.left.Store(1)
+	repo := tu.Reopen(t, fb)
+	src := t.TempDir()
+	for i := 0; i < 20; i++ {
+		tu.WriteFile(t, filepath.Join(src, fmt.Sprint(i)), tu.RandBytes(int64(i), 100<<10))
+	}
+	a, _ := archiver.New(repo, archiver.Options{Paths: []string{src}, FileWorkers: 4})
+	if _, err := a.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected disk full error, got %v", err)
+	}
+	snaps, _ := repo.Snapshots(context.Background())
+	if len(snaps) != 0 {
+		t.Fatal("snapshot saved despite storage failure")
+	}
+}
+
+func TestCancelledBackupLeavesUsableRepository(t *testing.T) {
+	repo, be := tu.NewRepo(t)
+	src := t.TempDir()
+	for i := 0; i < 40; i++ {
+		tu.WriteFile(t, filepath.Join(src, fmt.Sprint(i)), tu.RandBytes(int64(i), 200<<10))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	prog := &archiver.Progress{}
+	a, _ := archiver.New(repo, archiver.Options{Paths: []string{src}, Progress: prog})
+	go func() {
+		for prog.Stats().FilesDone < 5 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	if _, err := a.Run(ctx); err == nil {
+		t.Skip("backup finished before cancellation")
+	}
+	// A new backup on a fresh handle succeeds and restores correctly.
+	repo2 := tu.Reopen(t, be)
+	snap := backup(t, repo2, archiver.Options{Paths: []string{src}})
+	dst := t.TempDir()
+	if _, err := restorer.Restore(context.Background(), repo2, snap, src, restorer.Options{Target: dst, Verify: true}); err != nil {
+		t.Fatal(err)
+	}
+	tu.CompareTrees(t, tu.Snapshot(t, src), tu.Snapshot(t, filepath.Join(dst, filepath.Base(src))))
+	res, err := repo2.Check(context.Background(), repository.CheckOptions{ReadData: 1})
+	if err != nil || !res.OK() {
+		t.Fatalf("check after cancelled backup: %v %+v", err, res)
+	}
+	if _, err := repo2.Prune(context.Background(), repository.PruneOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := repo2.Check(context.Background(), repository.CheckOptions{ReadData: 1}); !res.OK() || len(res.Warnings) != 0 {
+		t.Fatalf("after prune: %+v", res)
 	}
 }

@@ -333,7 +333,7 @@ views.jobs = async main => {
       h('td', {}, h('b', {}, j.name), j.disabled ? ' (disabled)' : ''), h('td', {}, j.repository),
       h('td', { class: 'wrap' }, [...(j.paths || []), ...(j.devices || [])].join(', ')),
       h('td', { class: 'wrap' }, (j.schedule || []).map(s => h('span', { class: 'chip' }, s.cron + ' · ' + (s.type || 'auto')))),
-      h('td', { class: 'wrap' }, retentionText(j.retention)),
+      h('td', { class: 'normal' }, retentionText(j.retention)),
       h('td', {}, h('button', { class: 'small', onclick: () => editJob(j.name) }, 'Edit'), ' ',
         h('button', { class: 'small danger', onclick: async () => {
           if (!await confirmDlg('Delete job', 'Delete job ' + j.name + '? Existing snapshots are kept.', true)) return;

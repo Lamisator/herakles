@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,5 +334,23 @@ func TestLocalBackendRepo(t *testing.T) {
 	hdr, _, err := r2.LoadPackHeader(ctx, r2.Index().Packs()[0].ID)
 	if err != nil || len(hdr) != 1 {
 		t.Fatalf("pack header: %v", err)
+	}
+}
+
+func TestSplitPath(t *testing.T) {
+	cases := map[string]string{
+		"/home/alice/":    "home|alice",
+		`C:\Users\bob`:    "C|Users|bob",
+		"C:/Users":        "C|Users",
+		`\\nas\share\dir`: "nas|share|dir",
+		"/":               "",
+		"./x/./y":         "x|y",
+		"/dev/sda1":       "dev|sda1",
+		"/data/C:":        "data|C:",
+	}
+	for in, want := range cases {
+		if got := strings.Join(splitPath(in), "|"); got != want {
+			t.Errorf("splitPath(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

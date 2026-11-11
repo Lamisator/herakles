@@ -119,7 +119,7 @@ func TestTUIRunBackupAndBrowse(t *testing.T) {
 	h.waitFor("full")
 	h.key(tcell.KeyEnter, 0) // browse snapshot
 	h.waitFor("Browse")
-	h.waitFor("tmp/") // first path component of the temp dir
+	h.waitFor("└──") // first path component (tmp/ or C/) is listed
 }
 
 func TestTUIJobEditor(t *testing.T) {

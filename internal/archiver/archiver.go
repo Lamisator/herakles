@@ -57,6 +57,7 @@ type Archiver struct {
 	prog   *Progress
 
 	fileSem  chan struct{}
+	fileWG   sync.WaitGroup // in-flight file goroutines
 	blobJobs chan blobJob
 	blobWG   sync.WaitGroup
 	chunkers sync.Pool
@@ -64,8 +65,11 @@ type Archiver struct {
 	sumMu   sync.Mutex
 	summary repository.Summary
 	devices map[string]uint64 // root path -> device for one_file_system
-	fatal   atomic.Value
+	fatal   atomic.Pointer[errBox]
 }
+
+// errBox lets errors of different concrete types share one atomic slot.
+type errBox struct{ err error }
 
 type blobJob struct {
 	ctx  context.Context
@@ -225,7 +229,7 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 // Run performs the backup and saves the snapshot.
 func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 	start := time.Now()
-	a.prog.Start = start
+	a.prog.setStart(start)
 	vroot, paths, err := a.buildVTree()
 	if err != nil {
 		return nil, err
@@ -248,11 +252,16 @@ func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 		parentRoot = &t
 	}
 	treeID, err := a.saveVDir(ctx, vroot, parentRoot)
+	if err != nil {
+		cancel() // stop file workers that are still running
+	}
+	// File workers may still send blobs; wait for them before closing.
+	a.fileWG.Wait()
 	close(a.blobJobs)
 	a.blobWG.Wait()
 	if err == nil {
-		if f, ok := a.fatal.Load().(error); ok && f != nil {
-			err = f
+		if f := a.fatal.Load(); f != nil {
+			err = f.err
 		}
 	}
 	if err != nil {
@@ -592,7 +601,9 @@ func (a *Archiver) saveFileAsync(ctx context.Context, path string, fi os.FileInf
 		res <- fileResult{err: ctx.Err()}
 		return
 	}
+	a.fileWG.Add(1)
 	go func() {
+		defer a.fileWG.Done()
 		defer func() { <-a.fileSem }()
 		a.prog.setCurrent(path)
 		err := a.readContent(ctx, path, node, false)
@@ -681,7 +692,7 @@ func (a *Archiver) readContent(ctx context.Context, path string, node *repositor
 	}
 	wg.Wait()
 	if firstErr != nil {
-		a.fatal.CompareAndSwap(nil, firstErr)
+		a.fatal.CompareAndSwap(nil, &errBox{firstErr})
 		return fatalError{firstErr}
 	}
 	if !device && size != node.Size {

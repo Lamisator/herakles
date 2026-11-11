@@ -177,6 +177,10 @@ func splitPath(p string) []string {
 	for i := 0; i <= len(p); i++ {
 		if i == len(p) || p[i] == '/' || p[i] == '\\' {
 			if cur != "" && cur != "." {
+				// Windows drive letters ("C:") are stored as "C".
+				if len(out) == 0 && len(cur) == 2 && cur[1] == ':' {
+					cur = cur[:1]
+				}
 				out = append(out, cur)
 			}
 			cur = ""

@@ -204,11 +204,11 @@ func (a *App) findCmd() *cobra.Command {
 			}
 			if a.jsonOut {
 				type m struct {
-					Snapshot string    `json:"snapshot"`
-					Time     string    `json:"time"`
-					Path     string    `json:"path"`
-					Size     uint64    `json:"size"`
-					Type     string    `json:"type"`
+					Snapshot string `json:"snapshot"`
+					Time     string `json:"time"`
+					Path     string `json:"path"`
+					Size     uint64 `json:"size"`
+					Type     string `json:"type"`
 				}
 				out := []m{}
 				for _, x := range matches {
@@ -286,7 +286,7 @@ func (a *App) diffCmd() *cobra.Command {
 }
 
 type policyFlags struct {
-	p                                                     retention.Policy
+	p                                                   retention.Policy
 	within, withinH, withinD, withinW, withinM, withinY string
 }
 
@@ -504,4 +504,3 @@ func (a *App) copyCmd() *cobra.Command {
 	f.add(cmd)
 	return cmd
 }
-

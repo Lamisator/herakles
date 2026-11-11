@@ -8,7 +8,7 @@ import (
 
 // Progress tracks a running backup. All methods are safe for concurrent use.
 type Progress struct {
-	Start time.Time
+	start time.Time
 
 	filesDone   atomic.Int64
 	bytesDone   atomic.Int64
@@ -58,10 +58,14 @@ func (p *Progress) Stats() ProgressStats {
 		return ProgressStats{}
 	}
 	p.mu.Lock()
-	cur := p.current
+	cur, start := p.current, p.start
 	p.mu.Unlock()
+	var elapsed time.Duration
+	if !start.IsZero() {
+		elapsed = time.Since(start)
+	}
 	return ProgressStats{
-		Elapsed:     time.Since(p.Start),
+		Elapsed:     elapsed,
 		FilesDone:   p.filesDone.Load(),
 		BytesDone:   p.bytesDone.Load(),
 		FilesTotal:  p.filesTotal.Load(),
@@ -77,5 +81,11 @@ func (p *Progress) Stats() ProgressStats {
 func (p *Progress) setCurrent(s string) {
 	p.mu.Lock()
 	p.current = s
+	p.mu.Unlock()
+}
+
+func (p *Progress) setStart(t time.Time) {
+	p.mu.Lock()
+	p.start = t
 	p.mu.Unlock()
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"io"
 	"net"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -181,6 +182,9 @@ func startSFTP(t *testing.T) string {
 }
 
 func TestSFTP(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the in-process SFTP test server uses POSIX paths")
+	}
 	addr := startSFTP(t)
 	dir := t.TempDir()
 	b, err := NewSFTP("sftp://backup@"+addr+dir+"/repo", Options{Password: "pw", InsecureSkipVerify: true})
