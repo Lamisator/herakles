@@ -319,3 +319,14 @@ h2.set-section .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
 .dev-pick .note p { margin: 6px 0; }
 .plain-list { margin: 8px 0 12px; padding-left: 20px; }
 .plain-list li { margin: 4px 0; }
+/* hub: server picker and the bar while managing an attached server */
+.target-box { padding: 0 14px 10px; }
+.target-box label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 4px; }
+.target-box select { width: 100%; }
+.remote-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin: -4px 0 16px; border-radius: 8px;
+  background: rgba(47,111,222,.12); border: 1px solid rgba(47,111,222,.35); font-size: 13.5px; }
+.remote-bar.offline { background: rgba(217,142,4,.12); border-color: rgba(217,142,4,.4); }
+.remote-bar .spacer { flex: 1; }
+.code-box { width: 100%; font-size: 12px; word-break: break-all; white-space: pre-wrap; margin: 4px 0 8px; }
+pre.code-box { background: var(--border); padding: 6px 8px; border-radius: 6px; }
+.checks { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }

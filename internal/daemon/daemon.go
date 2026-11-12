@@ -35,6 +35,10 @@ type Daemon struct {
 	addr      string
 	ln        net.Listener
 	reload    func() (*config.Config, error)
+	// Extra adds to the status, e.g. the hub connection.
+	Extra func(*Status)
+	// AfterReload runs once a reloaded configuration is in use.
+	AfterReload func()
 }
 
 // Options configure a daemon.
@@ -133,6 +137,9 @@ func (d *Daemon) Reload() error {
 	d.Engine.SetConfig(cfg)
 	d.Scheduler.Reload()
 	d.Engine.Log.Info("configuration reloaded", "jobs", len(cfg.Jobs))
+	if d.AfterReload != nil {
+		d.AfterReload()
+	}
 	return nil
 }
 
@@ -145,6 +152,10 @@ type Status struct {
 	Active   []RunView                    `json:"active"`
 	Recent   []RunView                    `json:"recent"`
 	Last     map[string]*engine.JobResult `json:"last"`
+	// Hub lists the IDs of the servers connected to this hub.
+	Hub []string `json:"hub,omitempty"`
+	// Agent is the connection of this machine to its hub.
+	Agent any `json:"agent,omitempty"`
 }
 
 // Status collects the current state.
@@ -155,6 +166,9 @@ func (d *Daemon) Status() Status {
 		if r := h.Last(j.Name); r != nil {
 			st.Last[j.Name] = r
 		}
+	}
+	if d.Extra != nil {
+		d.Extra(&st)
 	}
 	return st
 }

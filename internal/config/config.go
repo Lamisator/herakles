@@ -37,6 +37,10 @@ type Config struct {
 	Web           Web             `yaml:"web,omitempty" json:"web"`
 	Server        Server          `yaml:"server,omitempty" json:"server"`
 	Notifications []*Notification `yaml:"notifications,omitempty" json:"notifications"`
+	// Hub: what this machine passes to the servers attached to it.
+	Hub Hub `yaml:"hub,omitempty" json:"hub"`
+	// Agent attaches this machine to a hub that manages it.
+	Agent Agent `yaml:"agent,omitempty" json:"agent"`
 	// StateDir stores run history, logs and the daemon token.
 	StateDir string `yaml:"state_dir,omitempty" json:"state_dir,omitempty"`
 
@@ -63,6 +67,9 @@ type Repository struct {
 	Remote           Remote      `yaml:"remote,omitempty" json:"remote"`
 	Chunker          ChunkerKiB  `yaml:"chunker,omitempty" json:"chunker"`
 	Maintenance      Maintenance `yaml:"maintenance,omitempty" json:"maintenance"`
+	// FromHub marks a repository the hub passed to this machine; the hub
+	// replaces it on every connection.
+	FromHub bool `yaml:"hub,omitempty" json:"hub,omitempty"`
 }
 
 // Remote holds connection settings for remote locations.
@@ -379,6 +386,31 @@ type Web struct {
 
 // IsZero lets yaml omit empty sections.
 func (w Web) IsZero() bool { return w == Web{} }
+
+// Hub configures this machine as the hub other servers attach to (see
+// 'herakles hub'). The hub needs the web interface: attached servers
+// connect to its URL.
+type Hub struct {
+	// Repositories are passed to every attached server, with their
+	// passwords, so the servers need no credentials of their own.
+	Repositories []string `yaml:"repositories,omitempty" json:"repositories,omitempty"`
+}
+
+// IsZero lets yaml omit empty sections.
+func (h Hub) IsZero() bool { return len(h.Repositories) == 0 }
+
+// Agent attaches this machine to a hub. 'herakles hub join' sets it; the
+// login of this machine is kept in the state directory (hub-agent.json).
+type Agent struct {
+	// Hub is the address of the hub's web interface.
+	Hub string `yaml:"hub,omitempty" json:"hub,omitempty"`
+	// CACert trusts a hub with a certificate of its own CA.
+	CACert             string `yaml:"ca_cert,omitempty" json:"ca_cert,omitempty"`
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify,omitempty" json:"insecure_skip_verify,omitempty"`
+}
+
+// IsZero lets yaml omit empty sections.
+func (a Agent) IsZero() bool { return a == Agent{} }
 
 // Server configures the repository server.
 type Server struct {
@@ -702,6 +734,18 @@ func (c *Config) Validate() error {
 		}
 		if _, err := ParsePercent(r.Maintenance.CheckReadData); err != nil {
 			add("repository %q: check_read_data: %v", r.Name, err)
+		}
+	}
+	for _, n := range c.Hub.Repositories {
+		if !repoNames[n] {
+			add("hub: unknown repository %q", n)
+		} else if r := c.Repo(n); r != nil && r.FromHub {
+			add("hub: repository %q came from another hub and cannot be passed on", n)
+		}
+	}
+	if c.Agent.Hub != "" {
+		if u, err := url.Parse(c.Agent.Hub); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			add("agent: hub must be an http(s) address, got %q", c.Agent.Hub)
 		}
 	}
 	if c.Web.Listen != "" {

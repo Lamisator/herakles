@@ -5,9 +5,11 @@ go 1.26.0
 require (
 	fyne.io/systray v1.12.2
 	github.com/bmatcuk/doublestar/v4 v4.10.4
+	github.com/coder/websocket v1.8.14
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/hashicorp/yamux v0.1.2
 	github.com/hirochachacha/go-smb2 v1.1.0
 	github.com/kardianos/service v1.3.0
 	github.com/klauspost/compress v1.20.4

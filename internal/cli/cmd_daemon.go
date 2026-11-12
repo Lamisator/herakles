@@ -18,6 +18,7 @@ import (
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/gui"
+	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/server"
 	"github.com/lamisator/herakles/internal/ui"
 )
@@ -249,14 +250,30 @@ func (a *App) runDaemon(ctx context.Context) error {
 	if err := d.Listen(); err != nil {
 		return err
 	}
+	ag := a.startAgent(ctx, d)
+	share.agent = ag.State
 	share.update(a.cfg)
 	defer share.close()
+	var hb *hub.Hub
+	if a.cfg.Web.Listen != "" {
+		hb = hub.New(ctx, hub.OpenStore(hub.StorePath(a.cfg.GetStateDir())), a.eng.Log, a.eng.Config)
+	}
+	d.Extra = func(st *daemon.Status) {
+		if hb != nil {
+			st.Hub = hb.Online()
+		}
+		if s := ag.State(); s != nil {
+			st.Agent = s
+		}
+	}
 	if a.cfg.Web.Listen != "" {
 		// The listen address may not exist yet at boot (e.g. a Docker
 		// bridge address), so keep trying instead of failing the daemon.
 		go func() {
 			for delay := 5 * time.Second; ; delay = min(2*delay, 2*time.Minute) {
-				inst, err := gui.Start(ctx, a.eng, a.webOptions(d))
+				opts := a.webOptions(d)
+				opts.Hub, opts.Agent = hb, ag.State
+				inst, err := gui.Start(ctx, a.eng, opts)
 				if err == nil {
 					a.eng.Log.Info("web interface started", "listen", a.cfg.Web.Listen, "url", a.cfg.Web.URL)
 					<-ctx.Done()

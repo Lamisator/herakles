@@ -28,10 +28,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lamisator/herakles/internal/accounts"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/engine"
+	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/restorer"
 	"github.com/lamisator/herakles/internal/tray"
@@ -58,6 +60,10 @@ type Options struct {
 	// Service marks the GUI of the system service, shared with the local
 	// users in gui.users (no tray of its own, see 'herakles daemon desktop').
 	Service bool
+	// Hub makes the web interface the hub that other servers attach to.
+	Hub *hub.Hub
+	// Agent reports the connection to this machine's hub, if attached.
+	Agent func() *hub.AgentState
 }
 
 // Server is the GUI backend.
@@ -70,6 +76,8 @@ type Server struct {
 	ctx     context.Context
 	web     *webAuth
 	service bool
+	hub     *hub.Hub
+	agent   func() *hub.AgentState
 
 	ticketMu sync.Mutex
 	tickets  map[string]time.Time
@@ -94,7 +102,7 @@ func newServer(ctx context.Context, eng *engine.Engine, opts Options) (*Server, 
 		runner = daemon.NewRunner(ctx, eng, 2)
 	}
 	eng.Prompt = nil
-	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx, service: opts.Service}
+	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx, service: opts.Service, hub: opts.Hub, agent: opts.Agent}
 	if opts.Web != nil {
 		if opts.Web.Log == nil {
 			opts.Web.Log = eng.Log
@@ -268,11 +276,33 @@ func decode(r *http.Request, v any) error {
 
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	mux := s.apiMux()
 	static, _ := fs.Sub(assets, "static")
-	files := http.FileServer(http.FS(static))
-	mux.Handle("GET /", files)
+	mux.Handle("GET /", http.FileServer(http.FS(static)))
+	if s.web != nil {
+		s.web.routes(mux)
+		if s.hub != nil {
+			s.hubRoutes(mux)
+			guarded := s.web.guard(mux)
+			agents := s.hub.Handler()
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Attached servers log in with their own credentials.
+				if strings.HasPrefix(r.URL.Path, "/hub/") {
+					agents.ServeHTTP(w, r)
+					return
+				}
+				guarded.ServeHTTP(w, r)
+			})
+		}
+		return s.web.guard(mux)
+	}
+	mux.HandleFunc("POST /api/ticket", s.ticket)
+	return s.guard(mux)
+}
 
+// apiMux holds the JSON API, the same for every mode.
+func (s *Server) apiMux() *http.ServeMux {
+	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", s.info)
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		if u := userOf(r); u != nil && !u.IsAdmin() {
@@ -319,12 +349,32 @@ func (s *Server) Handler() http.Handler {
 	s.dockerRoutes(mux)
 	s.databaseRoutes(mux)
 	s.wizardRoutes(mux)
-	if s.web != nil {
-		s.web.routes(mux)
-		return s.web.guard(mux)
-	}
-	mux.HandleFunc("POST /api/ticket", s.ticket)
-	return s.guard(mux)
+	return mux
+}
+
+// NewRemote returns the API of this machine for its hub. The hub has
+// checked the login; it says who is asking in headers, and plain users
+// get the same limits as in the web interface.
+func NewRemote(ctx context.Context, eng *engine.Engine, opts Options) http.Handler {
+	opts.Web = nil
+	s, _ := newServer(ctx, eng, opts)
+	mux := s.apiMux()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role := r.Header.Get(hub.RoleHeader)
+		if role != accounts.RoleAdmin {
+			role = accounts.RoleUser
+		}
+		u := &accounts.User{Name: r.Header.Get(hub.UserHeader), Role: role}
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			writeJSON(w, 404, apiError{Error: "not found"})
+			return
+		}
+		if !u.IsAdmin() && adminOnly(r) {
+			writeJSON(w, 403, apiError{Error: "only administrators can do this"})
+			return
+		}
+		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u)))
+	})
 }
 
 func nonNil[T any](v []T) []T {
@@ -424,6 +474,14 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		out["mode"] = "web"
 		out["user"] = viewOf(u)
 	}
+	if s.hub != nil {
+		out["hub"] = true
+	}
+	if s.agent != nil {
+		if st := s.agent(); st != nil {
+			out["agent"] = st
+		}
+	}
 	if s.service {
 		out["service"] = map[string]any{"users": nonNil(s.eng.Config().GUI.Users)}
 	}
@@ -445,6 +503,9 @@ func (s *Server) saveConfig(c *config.Config) error {
 	}
 	if cl, err := daemon.NewClient(c); err == nil {
 		_ = cl.Reload()
+	}
+	if s.hub != nil {
+		s.hub.PushAll()
 	}
 	return nil
 }
@@ -497,6 +558,9 @@ func (s *Server) putYAML(w http.ResponseWriter, r *http.Request) {
 	tray.ApplyLogged(c, s.eng.Log)
 	if cl, err := daemon.NewClient(c); err == nil {
 		_ = cl.Reload()
+	}
+	if s.hub != nil {
+		s.hub.PushAll()
 	}
 	writeJSON(w, 200, map[string]string{"status": "saved"})
 }

@@ -193,6 +193,13 @@ gui:
 #   # tls_key: /etc/herakles/web.key
 #   # session_hours: 12
 
+# Central management: with the web section, this machine is a hub that other
+# servers attach to ('herakles hub enroll' / 'herakles hub join CODE').
+# hub:
+#   repositories: [nas]                # passed to every server, with the password
+# agent:                               # set by 'herakles hub join'
+#   hub: https://backup.example.com
+
 tray:
   # Start 'herakles tray' (scheduled backups, GUI and a tray icon) when you
   # log in to your desktop. Use either this or the daemon service.

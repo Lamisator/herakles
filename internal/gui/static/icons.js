@@ -72,7 +72,7 @@ function icon(name, cls) {
 
 // Pictograms are added automatically: navigation by view, page titles and
 // empty states by their page, buttons by their label.
-const NAV_ICONS = { dashboard: 'dashboard', systems: 'systems', containers: 'containers', snapshots: 'snapshots', jobs: 'jobs', repos: 'repos',
+const NAV_ICONS = { dashboard: 'dashboard', servers: 'server', systems: 'systems', containers: 'containers', snapshots: 'snapshots', jobs: 'jobs', repos: 'repos',
   settings: 'settings', logs: 'logs', users: 'users', account: 'account', wizard: 'wizard' };
 const TITLE_ICONS = { 'Dashboard': 'dashboard', 'Systems': 'systems', 'Containers': 'containers', 'Snapshots & Restore': 'snapshots', 'Backup Jobs': 'jobs',
   'Repositories': 'repos', 'Configuration': 'settings', 'Activity Log': 'logs', 'Users': 'users', 'Account': 'account', 'New backup': 'wizard' };

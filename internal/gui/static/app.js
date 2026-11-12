@@ -91,17 +91,25 @@ function confirmDlg(title, text, danger) {
 }
 
 // ---------- API ----------
-async function api(method, path, body, retried) {
+// HUB_LOCAL are the hub's own pages; everything else under /api/ goes to
+// the server picked in the sidebar (state.target) when there is one.
+const HUB_LOCAL = /^\/api\/(hub|users|account)(\/|$|\?)/;
+function apiURL(path, local) {
+  if (!state.target || local || !path.startsWith('/api/') || HUB_LOCAL.test(path)) return path;
+  return '/api/hub/servers/' + encodeURIComponent(state.target.id) + path;
+}
+async function localApi(method, path, body) { return api(method, path, body, false, true); }
+async function api(method, path, body, retried, local) {
   const opts = { method, headers: { 'X-Herakles': '1' } };
   if (body !== undefined) { opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
-  const res = await fetch(path, opts);
+  const res = await fetch(apiURL(path, local), opts);
   let data = null;
   const text = await res.text();
   try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
   if (res.ok) return data;
   if (data && data.needs_password && !retried) {
     const ok = await askPassword(data.repo, data.error);
-    if (ok) return api(method, path, body, true);
+    if (ok) return api(method, path, body, true, local);
   }
   if (res.status === 401 && !(data && data.needs_password) && state.info && state.info.mode === 'web') {
     location.href = '/login.html?next=' + encodeURIComponent(location.pathname);
@@ -120,7 +128,7 @@ async function askPassword(repo, why) {
 }
 
 // ---------- state & routing ----------
-const state = { view: 'dashboard', config: null, info: null, timer: null, snapRepo: null };
+const state = { view: 'dashboard', config: null, info: null, timer: null, snapRepo: null, target: null, hubInfo: null };
 const views = {};
 
 function navigate(view) {
@@ -128,6 +136,12 @@ function navigate(view) {
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   if (state.timer) { clearInterval(state.timer); state.timer = null; }
   const main = clear($('#main'));
+  if (state.target && !['servers', 'users', 'account'].includes(view)) {
+    main.append(h('div', { class: 'remote-bar' + (state.target.online ? '' : ' offline') }, icon('server'),
+      h('span', {}, 'Managing ', h('b', {}, state.target.name), state.target.online ? ' (attached server)' : ' (offline)'),
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'small', title: 'Manage the hub itself again', onclick: () => switchTarget(null) }, 'Back to ' + (state.hubInfo ? state.hubInfo.hostname : 'the hub'))));
+  }
   views[view](main).catch(e => main.append(h('div', { class: 'empty' }, 'Error: ' + e.message)));
 }
 document.querySelectorAll('#nav a').forEach(a => a.addEventListener('click', () => navigate(a.dataset.view)));
@@ -156,8 +170,8 @@ views.dashboard = async main => {
   main.append(jobsEl, h('h2', {}, 'Activity'), activity);
   const render = async () => {
     const [jobs, runs, info] = await Promise.all([api('GET', '/api/jobs'), api('GET', '/api/runs'), api('GET', '/api/info')]);
-    state.info = info;
-    renderDaemon(info);
+    state.info = mergeInfo(info);
+    renderDaemon(state.info);
     const active = {};
     runs.active.forEach(r => { active[r.kind + ':' + r.target] = r; });
     $('#dash-sub').textContent = jobs.length + ' jobs · configuration ' + info.config_path;
@@ -217,10 +231,15 @@ function renderDaemon(info) {
   if (info.daemon) {
     const n = (info.daemon.schedule || [])[0];
     el.append(h('div', {}, h('span', { class: 'badge success' }, 'daemon running')),
-      n ? h('div', { style: 'margin-top:6px' }, 'next: ' + n.kind + ' ' + n.target, h('br'), fmtTime(n.next)) : null);
+      n ? h('div', { style: 'margin-top:6px' }, 'next: ' + n.kind + ' ' + n.target, h('br'), fmtTime(n.next)) : '');
   } else {
     el.append(h('div', {}, h('span', { class: 'badge' }, 'daemon not running')),
       h('div', { style: 'margin-top:6px' }, 'Scheduled backups need ', h('span', { class: 'mono' }, 'herakles daemon install')));
+  }
+  if (info.agent && !info.remote) {
+    el.append(h('div', { style: 'margin-top:8px', title: info.agent.error || '' },
+      h('span', { class: 'badge ' + (info.agent.connected ? 'success' : 'warning') }, info.agent.connected ? 'hub connected' : 'hub not connected'),
+      h('div', { class: 'muted', style: 'margin-top:4px;word-break:break-all' }, 'Managed by ', info.agent.hub)));
   }
 }
 
@@ -1040,7 +1059,10 @@ views.repos = async main => {
     const unlockWith = [r.password ? 'inline password' : r.password_file ? 'password file' : r.password_env ? 'env ' + r.password_env : r.password_command ? 'password command' : null, r.key_file ? 'key file' : null].filter(Boolean).join(' + ') || 'asks for password';
     const m = r.maintenance || {};
     grid.append(h('div', { class: 'card' },
-      h('h3', {}, r.name), h('div', { class: 'meta mono' }, r.location),
+      h('h3', {}, r.name,
+        r.hub ? h('span', { class: 'chip', title: 'Passed on by the hub with its password; it changes it on every connection' }, 'from the hub') : null,
+        (cfg.hub && cfg.hub.repositories || []).includes(r.name) ? h('span', { class: 'chip', title: 'Passed to every attached server (Servers page)' }, 'shared with servers') : null),
+      h('div', { class: 'meta mono' }, r.location),
       h('div', { class: 'meta' }, 'Unlock: ', unlockWith, ' · compression: ', r.compression || 'auto'),
       m.prune_schedule || m.check_schedule ? h('div', { class: 'meta' }, 'Maintenance: ', [m.prune_schedule ? 'prune ' + m.prune_schedule : '', m.check_schedule ? 'check ' + m.check_schedule : ''].filter(Boolean).join(' · ')) : null,
       statsBox,
@@ -1056,8 +1078,8 @@ views.repos = async main => {
         h('button', { title: 'Verify that the stored backups are complete and readable', onclick: () => task(r.name, 'check') }, 'Check'),
         h('button', { title: 'Delete snapshots the retention rules no longer keep and free their space', onclick: async () => { if (await confirmDlg('Prune', 'Apply all retention policies of jobs using ' + r.name + ' and remove unreferenced data?')) task(r.name, 'prune'); } }, 'Prune'),
         h('span', { class: 'spacer' }),
-        h('button', { class: 'small', title: 'Change location or password source', onclick: () => editRepo(r.name) }, 'Edit'),
-        h('button', { class: 'small danger', title: 'Remove from the configuration; stored backups are kept', onclick: async () => {
+        r.hub ? null : h('button', { class: 'small', title: 'Change location or password source', onclick: () => editRepo(r.name) }, 'Edit'),
+        r.hub ? null : h('button', { class: 'small danger', title: 'Remove from the configuration; stored backups are kept', onclick: async () => {
           if (!await confirmDlg('Remove repository', 'Remove ' + r.name + ' from the configuration? Stored backups are NOT deleted.', true)) return;
           const c = await loadConfig(); c.repositories = c.repositories.filter(x => x.name !== r.name);
           try { await saveConfig(c); navigate('repos'); } catch (e) { toast(e.message, true); }
@@ -1769,12 +1791,153 @@ function renderUser(info) {
       h('a', { onclick: async () => { await api('POST', '/auth/logout'); location.href = '/login.html'; } }, 'Sign out')));
 }
 
+// ---------- hub: attached servers ----------
+// mergeInfo keeps the hub's login on a remote server's info.
+function mergeInfo(i) {
+  if (!state.target || !state.hubInfo) return i;
+  return { ...i, mode: state.hubInfo.mode, user: state.hubInfo.user, remote: state.target };
+}
+async function loadInfo() {
+  try { state.hubInfo = await localApi('GET', '/api/info'); } catch (e) { state.hubInfo = null; }
+  state.info = state.hubInfo;
+  if (state.target) {
+    try { state.info = mergeInfo(await api('GET', '/api/info')); } catch (e) { state.info = { ...state.hubInfo, remote: state.target }; }
+  }
+}
+async function switchTarget(t) {
+  state.target = t;
+  try { sessionStorage.setItem('herakles.target', t ? JSON.stringify(t) : ''); } catch (e) { /* storage blocked */ }
+  state.config = null;
+  await loadInfo();
+  await renderTargets();
+  if (state.info) renderDaemon(state.info);
+  navigate(['servers', 'users', 'account'].includes(state.view) ? 'dashboard' : state.view);
+}
+// renderTargets fills the server picker of a hub.
+async function renderTargets() {
+  const box = clear($('#target-box'));
+  if (!state.hubInfo || !state.hubInfo.hub) { box.hidden = true; return; }
+  let servers = [];
+  try { servers = (await localApi('GET', '/api/hub')).servers; } catch (e) { /* keep the hub only */ }
+  box.hidden = !servers.length;
+  if (state.target) {
+    const cur = servers.find(x => x.id === state.target.id);
+    if (cur) state.target.online = cur.online;
+  }
+  const sel = h('select', { title: 'The computer this interface manages', onchange: () => {
+    const v = sel.value; const x = servers.find(y => y.id === v);
+    switchTarget(x ? { id: x.id, name: x.name, online: x.online } : null);
+  } },
+  h('option', { value: '' }, (state.hubInfo.hostname || 'this computer') + ' (hub)'),
+  servers.map(x => h('option', { value: x.id, selected: state.target && state.target.id === x.id }, (x.online ? '● ' : '○ ') + x.name + (x.online ? '' : ' (offline)'))));
+  box.append(h('label', {}, 'Managing'), sel);
+}
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => toast('Copied')); return; }
+  const t = h('textarea', {}, text); document.body.append(t); t.select();
+  try { document.execCommand('copy'); toast('Copied'); } catch (e) { toast('Copy it by hand', true); }
+  t.remove();
+}
+
+views.servers = async main => {
+  const [data, cfg] = await Promise.all([localApi('GET', '/api/hub'), localApi('GET', '/api/config')]);
+  main.append(h('h1', {}, 'Servers'),
+    h('div', { class: 'sub' }, 'Servers attached to this hub. Pick one under "Managing" in the menu, or click Manage, to set up its backups with the wizard, see its disks, run, browse and restore, as if you were logged in there.'),
+    h('div', { class: 'toolbar' },
+      isAdmin() ? h('button', { class: 'primary', title: 'Create a one-time code that attaches another server to this hub', onclick: enrollDlg }, '+ Enroll a server') : null,
+      h('button', { title: 'Reload the list', onclick: () => navigate('servers') }, 'Refresh')));
+  const grid = h('div', { class: 'grid' });
+  if (!data.servers.length) {
+    grid.append(h('div', { class: 'empty' }, 'No servers attached yet. Install Herakles on a server, then enroll it with a code from "Enroll a server".'));
+  }
+  for (const x of data.servers) {
+    const jobsBox = h('div', { class: 'meta' });
+    const hel = x.hello || {};
+    const sync = x.sync || {};
+    grid.append(h('div', { class: 'card' },
+      h('h3', {}, icon('server'), x.name, h('span', { class: 'badge ' + (x.online ? 'success' : '') }, x.online ? 'online' : 'offline')),
+      h('div', { class: 'meta' }, [hel.hostname, hel.os && hel.os + '/' + hel.arch, hel.container && 'container (' + hel.container + ')'].filter(Boolean).join(' · ')),
+      h('div', { class: 'meta' }, 'Herakles ', hel.version || '?',
+        hel.version && state.hubInfo && hel.version !== state.hubInfo.version ? h('span', { class: 'chip', title: 'Hub and server run different versions; some pages may not work until both are updated' }, 'hub has ' + state.hubInfo.version) : null),
+      h('div', { class: 'meta' }, x.online ? 'Connected since ' + fmtTime(x.since) : 'Last seen ' + ago(x.last_seen), x.address ? ' from ' + x.address : ''),
+      x.sync_error ? h('div', { class: 'meta', style: 'color:var(--err)' }, 'Repositories not passed on: ' + x.sync_error) : null,
+      (sync.conflicts || []).length ? h('div', { class: 'meta', style: 'color:var(--warn)' }, 'Not passed on, the server has its own repository with that name: ' + sync.conflicts.join(', ')) : null,
+      (sync.kept || []).length ? h('div', { class: 'meta' }, 'No longer shared but still used: ' + sync.kept.join(', ')) : null,
+      jobsBox,
+      h('div', { class: 'actions' },
+        h('button', { class: 'primary', disabled: !x.online, title: 'Manage this server: its backups, disks and snapshots', onclick: () => switchTarget({ id: x.id, name: x.name, online: x.online }) }, 'Manage'),
+        h('span', { class: 'spacer' }),
+        isAdmin() ? h('button', { class: 'small', title: 'Change the name shown on the hub', onclick: async () => {
+          const input = h('input', { value: x.name });
+          const ok = await modal('Rename ' + x.name, [h('label', {}, 'Name'), input], [{ label: 'Cancel', value: false },
+            { label: 'Rename', class: 'primary', action: async () => { await localApi('PUT', '/api/hub/servers/' + x.id, { name: input.value }); return true; } }], 'small');
+          if (ok) { await renderTargets(); navigate('servers'); }
+        } }, 'Rename') : null,
+        isAdmin() ? h('button', { class: 'small danger', title: 'Detach: the server can no longer connect; its backups keep running on their own', onclick: async () => {
+          if (!await confirmDlg('Remove ' + x.name, 'Detach ' + x.name + ' from the hub? It can no longer connect. Its own backups keep running, with the repositories the hub passed on. To attach it again, enroll it with a new code.', true)) return;
+          try { await localApi('DELETE', '/api/hub/servers/' + x.id); if (state.target && state.target.id === x.id) state.target = null; await renderTargets(); navigate('servers'); } catch (e) { toast(e.message, true); }
+        } }, 'Remove') : null)));
+    if (x.online) {
+      localApi('GET', '/api/hub/servers/' + encodeURIComponent(x.id) + '/api/jobs').then(jobs => {
+        clear(jobsBox).append(jobs.length ? jobs.map(j => h('span', { class: 'chip', title: j.last && j.last.error ? j.last.error : (j.last ? 'last run ' + ago(j.last.start) : 'never run') },
+          icon(jobIcon(j)), j.name, ' ', h('span', { class: 'badge ' + (j.active ? 'running' : (j.last && j.last.status) || '') }, j.active ? 'running' : (j.last && j.last.status) || 'never run'))) : 'No backup jobs yet.');
+      }).catch(e => clear(jobsBox).append(e.message));
+    }
+  }
+  main.append(grid);
+
+  // Repositories passed to every server.
+  const own = (cfg.repositories || []).filter(r => !r.hub);
+  const shared = new Set(data.shared || []);
+  const boxes = own.map(r => { const c = h('input', { type: 'checkbox', checked: shared.has(r.name), disabled: !isAdmin() }); c.dataset.name = r.name; return c; });
+  main.append(h('h2', {}, 'Repositories for all servers'),
+    h('div', { class: 'card' },
+      h('div', { class: 'meta' }, 'These repositories are passed to every attached server, with their passwords: the servers need no credentials of their own, and backups of several servers share one deduplicated store. Pruning and checks of shared repositories run here on the hub.'),
+      own.length ? h('div', { class: 'checks' }, own.map((r, i) => h('label', { class: 'check' }, boxes[i], ' ', h('b', {}, r.name), ' ', h('span', { class: 'muted mono' }, r.location)))) : h('div', { class: 'muted' }, 'Add a repository first (Repositories).'),
+      isAdmin() && own.length ? h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: async () => {
+        try {
+          await localApi('PUT', '/api/hub/shared', { repositories: boxes.filter(b => b.checked).map(b => b.dataset.name) });
+          toast('Saved; connected servers get the change now');
+        } catch (e) { toast(e.message, true); }
+      } }, 'Save')) : null),
+    h('div', { class: 'hint' }, 'Only servers the hub\'s administrators may control should be attached: from here, their backups can be changed completely, including commands that run before and after them.'));
+  renderTargets();
+};
+
+async function enrollDlg() {
+  const name = h('input', { placeholder: 'e.g. web-1 (default: the server\'s host name)' });
+  const out = h('div');
+  const site = 'https://herakles.kloeck-it.de/install.sh';
+  await modal('Enroll a server', [
+    h('p', {}, 'Creates a one-time enrollment code. It holds everything the server needs: the hub\'s address, a secret that works once within 24 hours, and the hub\'s identity key, so the server only ever talks to this hub.'),
+    h('label', {}, 'Name on the hub'), name, out], [
+    { label: 'Close', value: true },
+    { label: 'Create code', class: 'primary', action: async () => {
+      const r = await localApi('POST', '/api/hub/enroll', { name: name.value.trim() });
+      clear(out).append(
+        h('label', {}, '1. Install Herakles on the server (choose "server"), if it is not yet:'),
+        h('pre', { class: 'code-box' }, 'curl -fsSL ' + site + ' | sudo sh'),
+        h('label', {}, '2. Run on the server:'),
+        h('textarea', { class: 'mono code-box', readonly: true, rows: 4, onclick: e => e.target.select() }, r.command),
+        h('div', { class: 'actions' },
+          h('button', { onclick: () => copyText(r.command) }, 'Copy command'),
+          h('button', { onclick: () => copyText(r.code) }, 'Copy code only')),
+        h('div', { class: 'hint' }, 'Works once, until ', fmtTime(r.expires), '. Hub key ', h('span', { class: 'mono' }, r.hub_key), '. The server appears on this page as soon as it is attached.'));
+      return false;
+    } }]);
+  navigate('servers');
+}
+
 async function boot() {
-  try { state.info = await api('GET', '/api/info'); } catch (e) { state.info = null; }
-  const web = state.info && state.info.mode === 'web';
+  try { const t = sessionStorage.getItem('herakles.target'); if (t) state.target = JSON.parse(t); } catch (e) { /* storage blocked */ }
+  await loadInfo();
+  if (state.target && !(state.hubInfo && state.hubInfo.hub)) { state.target = null; state.info = state.hubInfo; }
+  const web = state.hubInfo && state.hubInfo.mode === 'web';
   document.querySelectorAll('#nav [data-web]').forEach(a => { a.hidden = !web; });
+  document.querySelectorAll('#nav [data-hub]').forEach(a => { a.hidden = !(state.hubInfo && state.hubInfo.hub); });
   document.querySelectorAll('#nav [data-admin]').forEach(a => { a.hidden = a.hidden || !isAdmin(); });
   if (state.info) renderUser(state.info);
+  await renderTargets();
   navigate('dashboard');
 }
 boot();
@@ -1789,7 +1952,7 @@ function downloadURL(repo, id, paths, format) {
   return snapBase(repo, id) + '/download?' + q.join('&');
 }
 function startDownload(url) {
-  const a = h('a', { href: url, download: '' });
+  const a = h('a', { href: apiURL(url), download: '' });
   document.body.append(a); a.click(); a.remove();
 }
 function formatSelect() {
@@ -1995,7 +2158,7 @@ async function openExplorer(opts) {
   };
   const showPreview = async e => {
     current = e;
-    const url = snapBase(repo, snap.id) + '/preview?path=' + encodeURIComponent(e.path);
+    const url = apiURL(snapBase(repo, snap.id) + '/preview?path=' + encodeURIComponent(e.path));
     const body = h('div', { class: 'ex-pv-body' }, h('div', { class: 'muted' }, 'Loading…'));
     clear(preview).append(
       h('div', { class: 'ex-pv-head' }, icon(entryIcon(e)), h('b', { class: 'wrap' }, e.name), h('span', { class: 'spacer' }),

@@ -49,6 +49,8 @@
       <ol><li><a href="#db-setup">Setting it up</a></li><li><a href="#db-restore">Restoring a database</a></li></ol></li>
     <li><a href="#web">Web interface &amp; accounts</a>
       <ol><li><a href="#web-setup">Setting it up</a></li><li><a href="#web-accounts">Accounts and passkeys</a></li><li><a href="#web-proxy">Behind a reverse proxy</a></li></ol></li>
+    <li><a href="#hub">Central management (hub)</a>
+      <ol><li><a href="#hub-enroll">Attaching a server</a></li><li><a href="#hub-manage">Managing servers</a></li><li><a href="#hub-repos">Shared repositories</a></li><li><a href="#hub-protocol">How the connection is secured</a></li></ol></li>
     <li><a href="#replication">Copies and the 3‑2‑1 rule</a></li>
     <li><a href="#hooks">Hooks and notifications</a></li>
     <li><a href="#maintenance">Maintenance</a></li>
@@ -733,6 +735,46 @@ herakles dump latest /herakles-databases/postgres/shop.sql &gt; shop.sql   <span
         servers: [{ url: "http://192.168.32.1:7480" }]</pre>
 <p>If the listen address does not exist yet when the service starts (a Docker bridge at boot), the daemon keeps retrying in the background.</p>
 
+<h2 id="hub">Central management (hub)</h2>
+<p>With several servers, set up backups for all of them in one place. A Herakles with the <a href="#web">web interface</a> is a <b>hub</b>; other servers attach to it and are then managed from its web interface, as if you were logged in on each of them: the wizard, their disks, jobs, snapshots, restores, configuration and log. Each server keeps its own configuration and schedule, keeps backing up when the hub is unreachable, and can still be configured locally.</p>
+<p>The servers connect <i>out</i> to the hub's web address and keep that connection open, so they need no open port and can sit behind NAT or a firewall. The hub needs nothing beyond its web interface: a reverse proxy in front of it works as is (the connection is a WebSocket).</p>
+
+<h3 id="hub-enroll">Attaching a server</h3>
+<ol>
+<li>On the hub, open <b>Servers → Enroll a server</b> (or run <code>herakles hub enroll --name web-1</code>). You get a one-time <b>enrollment code</b>.</li>
+<li>Install Herakles on the server as a <a href="#service">system service</a> (<code>install.sh</code>: choose “server”).</li>
+<li>Run the command shown, as root:</li>
+</ol>
+<pre>sudo herakles hub join HKE1-eyJ1IjoiaHR0cHM6Ly9iYWNrdXAuZXhhbXBsZS5jb20iLCJzIjoi…
+<span class="c"># attached to https://backup.example.com as "web-1" (hub key 0225:7f9b:…)</span>
+<span class="c"># the daemon connects now</span>
+herakles hub status</pre>
+<p>The code is a single string with everything the server needs: the hub's address, a secret that works <b>once</b> within 24 hours (<code>--valid 2h</code> for less), the hub's identity key, the name on the hub, and — when the hub serves TLS itself with <code>web.tls_cert</code> — a pin of its certificate, so even a self-signed hub needs no CA file. A checksum catches copy errors. For a hub with a certificate from a private CA, add <code>--ca-cert FILE</code> to <code>join</code>.</p>
+
+<h3 id="hub-manage">Managing servers</h3>
+<p>Attached servers appear on the <b>Servers</b> page with their state, system, version and the result of their jobs. Pick one under <b>Managing</b> at the top of the menu (or click <b>Manage</b>): a blue bar shows which server you are working on, and every page acts on that server until you switch back. Plain users of the hub get the same rights on the servers as on the hub (run, browse, restore, no configuration and no secrets).</p>
+<pre>herakles hub servers                    <span class="c"># NAME  ID  STATE  HOST  SYSTEM  VERSION  LAST SEEN</span>
+herakles hub rename web-1 web-frontend
+herakles hub remove web-frontend        <span class="c"># it can no longer connect</span>
+sudo herakles hub leave                 <span class="c"># on the server: detach it</span></pre>
+<p>A removed or detached server keeps running its backups on its own. Update hub and servers together; the Servers page marks servers with another version.</p>
+
+<h3 id="hub-repos">Shared repositories</h3>
+<p>Under <b>Servers → Repositories for all servers</b> (or in the configuration), pick the hub's repositories that every server should use:</p>
+<pre>hub:
+  repositories: [storagebox]</pre>
+<p>They are passed to each server <b>with their passwords</b> on every connection and after every change, so there is one password to keep and the servers need no credentials of their own. On a server they appear with “from the hub” and cannot be edited there; the password (and key, SSH and CA files) are stored in <code>&lt;state_dir&gt;/hub/repositories/</code> with mode 0600. Several servers backing up into one repository share one deduplicated store: their snapshots are kept apart by host name (see <b>Systems</b>), retention groups by host, and pruning and checks of a shared repository run only on the hub. A repository of the server with the same name wins over the hub's. When a repository is no longer shared, it is removed from the servers, unless a job there still uses it.</p>
+
+<h3 id="hub-protocol">How the connection is secured</h3>
+<figure class="frame"><img src="img/hub-protocol.webp" width="1500" height="2147" loading="lazy" alt="Sequence diagram: enrollment code, enrollment with signed answer, signed connection over a WebSocket, and forwarded requests"></figure>
+<ul>
+<li><b>No reusable password crosses the network.</b> The server makes its own Ed25519 key pair at enrollment and sends only the public half; the hub stores it and a hash of the used-up secret.</li>
+<li><b>The server only talks to the real hub.</b> Every answer at enrollment and every connection handshake is signed with the hub's identity key from the code, independent of TLS; an impostor or a proxy in between is refused.</li>
+<li><b>Logins cannot be replayed:</b> each carries a timestamp and a random nonce, both signed; nonces are remembered and clocks may differ by at most 5 minutes (keep NTP running).</li>
+<li><b>A server cannot attack the hub's pages:</b> answers forwarded from servers are sandboxed and never served as HTML or scripts, and the hub's cookies are never forwarded.</li>
+<li><b>Trust:</b> whoever administers the hub controls the attached servers completely, since backups run as root and jobs can run hooks. Attach only servers the hub's administrators may control, and protect the hub's accounts with passkeys.</li>
+</ul>
+
 <h2 id="replication">Copies and the 3‑2‑1 rule</h2>
 <p>Keep 3 copies of your data, on 2 different media, 1 of them off-site. With Herakles, back up to a local repository and copy the snapshots to a second one:</p>
 <pre>herakles copy --from usb-disk --to offsite                  <span class="c"># all snapshots not yet there</span>
@@ -965,6 +1007,13 @@ daemon:
 # web:                         # web interface with accounts (served by the daemon)
 #   listen: 127.0.0.1:7480
 #   url: https://backup.example.com
+
+# hub:                         # with web: servers attach here ('herakles hub enroll')
+#   repositories: [nas]        # passed to every attached server, with the password
+
+# agent:                       # set by 'herakles hub join': this server's hub
+#   hub: https://backup.example.com
+#   ca_cert: /etc/herakles/hub-ca.pem   # only for a private CA
 
 gui:
   listen: 127.0.0.1:7478
