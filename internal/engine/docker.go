@@ -108,12 +108,12 @@ func Remainder(job *config.Job, all []docker.Project) (paths, excludes []string)
 	return paths, excludes
 }
 
-// globEscape makes a path safe to use as an exclude pattern.
+// globEscape makes a path safe to use as an exclude pattern. Special
+// characters go into character classes ("[*]"), not behind backslashes: on
+// Windows the filter turns every backslash into a separator.
 func globEscape(p string) string {
-	// Separators first: on Windows a backslash is one, and an escaped one
-	// ("C:\\Users") no longer matched after the filter turned it into "/".
 	p = filepath.ToSlash(p)
-	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[", "{", "\\{").Replace(p)
+	return strings.NewReplacer("\\", "\\\\", "*", "[*]", "?", "[?]", "[", "[[]", "{", "[{]").Replace(p)
 }
 
 // DockerSearch says where a job looks for projects without containers.
