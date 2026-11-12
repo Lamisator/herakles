@@ -120,15 +120,29 @@ func checked(f *tview.Form, label string) bool {
 
 // ---------- 1 what ----------
 
+// inContainer is replaced in tests.
+var inContainer = blockdev.Container
+
 func (w *wiz) what() tview.Primitive {
+	kinds := []string{wizard.Files, wizard.Docker, wizard.Disk}
 	l := tview.NewList().
 		AddItem("Files & folders", "Documents, home directories, server data", '1', nil).
-		AddItem("Docker containers", "Each Compose project on its own, with volumes and database dumps", '2', nil).
-		AddItem("A whole disk or partition", "An image for disaster recovery", '3', nil)
+		AddItem("Docker containers", "Each Compose project on its own, with volumes and database dumps", '2', nil)
+	if ct := inContainer(); ct != "" {
+		kinds = []string{wizard.Files, wizard.Docker, wizard.System, wizard.Disk}
+		l.AddItem("This whole container", "Every file of this container ("+ct+"): its full backup", '3', nil).
+			AddItem("A disk passed into the container", "Images only work for disks the host passes in", '4', nil)
+	} else {
+		l.AddItem("A whole disk or partition", "An image for disaster recovery", '3', nil)
+	}
 	l.SetBorder(true).SetTitle(" What do you want to back up? (Enter selects, Esc leaves) ")
-	l.SetCurrentItem(map[string]int{wizard.Files: 0, wizard.Docker: 1, wizard.Disk: 2}[w.plan.Kind])
+	for i, k := range kinds {
+		if k == w.plan.Kind {
+			l.SetCurrentItem(i)
+		}
+	}
 	l.SetSelectedFunc(func(i int, _, _ string, _ rune) {
-		kind := []string{wizard.Files, wizard.Docker, wizard.Disk}[i]
+		kind := kinds[i]
 		if kind != w.plan.Kind {
 			w.plan.Kind, w.plan.Name = kind, ""
 		}
@@ -165,7 +179,11 @@ func (w *wiz) diskSources() tview.Primitive {
 			if d.Parent != "" {
 				depth[d.Name] = depth[d.Parent] + 1
 			}
-			opts = append(opts, fmt.Sprintf("%s%s  %s  %s", strings.Repeat("  ", depth[d.Name]), d.Path, ui.Bytes(int64(d.Size)), d.Describe()))
+			desc := d.Describe()
+			if d.Unavailable != "" {
+				desc = "UNAVAILABLE: " + d.Unavailable
+			}
+			opts = append(opts, fmt.Sprintf("%s%s  %s  %s", strings.Repeat("  ", depth[d.Name]), d.Path, ui.Bytes(int64(d.Size)), desc))
 			if w.plan.Device != "" && (w.plan.Device == d.Path || w.plan.Device == d.Stable) {
 				cur = i
 			}
@@ -186,6 +204,9 @@ func (w *wiz) diskSources() tview.Primitive {
 		"Reading devices needs root (administrator on Windows). Devices marked \"system\" change while they are read."
 	if err != nil {
 		hint = err.Error() + "\ne.g. /dev/sda1, /dev/nvme0n1 or \\\\.\\C: on Windows. Needs root/administrator rights."
+	} else if ct := inContainer(); ct != "" {
+		hint = "Herakles runs in a container (" + ct + "): it cannot read disks the host has not passed in (marked UNAVAILABLE). " +
+			"For a full backup of the container, go back and choose \"This whole container\"."
 	}
 	f.AddTextView("", hint, 90, 5, true, false)
 	return f
@@ -197,6 +218,13 @@ func (w *wiz) sources() tview.Primitive {
 		return w.dockerSources()
 	case wizard.Disk:
 		return w.diskSources()
+	case wizard.System:
+		f := w.form("The whole container", func() error { return nil })
+		f.AddCheckbox("Leave out mounted volumes", w.plan.OneFS, func(c bool) { w.plan.OneFS = c })
+		f.AddTextView("", "Backs up / with everything in it. /proc, /sys, /dev, /run and other kernel and memory "+
+			"file systems are left out by themselves (their mount points are kept), as are the contents of /tmp and "+
+			"/var/tmp and package caches. Add databases as dumps afterwards: a running database's files may be inconsistent.", 90, 5, true, false)
+		return f
 	}
 	f := w.form("Which files and folders?", func() error {
 		if len(splitList(w.joinedPaths())) == 0 {
@@ -535,6 +563,8 @@ func (w *wiz) summary() string {
 		fmt.Fprintf(&b, "Backs up:  %s\n", s)
 	case wizard.Disk:
 		fmt.Fprintf(&b, "Backs up:  %s\n", w.plan.Device)
+	case wizard.System:
+		fmt.Fprintf(&b, "Backs up:  the whole container (/)\n")
 	default:
 		fmt.Fprintf(&b, "Backs up:  %s\n", strings.Join(w.plan.Paths, ", "))
 	}

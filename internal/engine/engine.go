@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -421,6 +423,12 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	uj.Name = u.Name
 	typ, parent := ResolveType(&uj, ro.Type, snaps, host, time.Now())
 	maxSize, _ := config.ParseSize(job.ExcludeLargerThan)
+	excludes := append(append([]string(nil), job.Exclude...), u.Excludes...)
+	if dir := localRepoDir(e.Config().Repo(job.Repository)); dir != "" {
+		// A backup of / (or of the disk holding the repository) must not
+		// store the repository in itself.
+		excludes = append(excludes, globEscape(dir))
+	}
 	var streams []archiver.Stream
 	var dbs []repository.DatabaseDump
 	if u.Databases && len(job.Databases) > 0 {
@@ -432,7 +440,7 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	}
 	a, err := archiver.New(repo, archiver.Options{
 		Streams: streams, Databases: dbs,
-		Paths: u.Paths, Devices: u.Devices, Excludes: append(append([]string(nil), job.Exclude...), u.Excludes...), ExcludeIfPresent: job.ExcludeIfPresent,
+		Paths: u.Paths, Devices: u.Devices, Excludes: excludes, ExcludeIfPresent: job.ExcludeIfPresent,
 		ExcludeCaches: job.ExcludeCaches, ExcludeLargerThan: maxSize, OneFileSystem: job.OneFileSystem,
 		Type: typ, Parent: parent, Job: u.Name, Hostname: host, Tags: job.Tags, Docker: u.Docker,
 		FileWorkers: job.FileWorkers, Progress: ro.Progress,
@@ -461,6 +469,26 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 		r.forgotten = n
 	}
 	return r, nil
+}
+
+// localRepoDir is the directory of a repository on a local path, "" for
+// remote ones.
+func localRepoDir(rc *config.Repository) string {
+	if rc == nil {
+		return ""
+	}
+	loc := rc.Location
+	if l := strings.ToLower(loc); strings.HasPrefix(l, "file://") {
+		loc = loc[len("file://"):]
+	}
+	if loc == "" || strings.Contains(loc, "://") || strings.HasPrefix(strings.ToLower(loc), "rest:") || strings.HasPrefix(loc, `\\`) {
+		return ""
+	}
+	p, err := filepath.Abs(config.ExpandHome(loc))
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // ApplyRetention forgets snapshots matching filter according to policy and

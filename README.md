@@ -401,6 +401,14 @@ herakles restore latest:/dev/sda1 --target /tmp          # → /tmp/sda1 image f
 
 Herakles images the device content block by block, so unused (zero) areas deduplicate and compress to almost nothing. For consistent images, back up unmounted or read‑only filesystems, or LVM/ZFS/btrfs snapshots created in a `before` hook.
 
+### Inside a container (LXC, Docker, Podman)
+
+A container sees the host's disks in `/sys`, but cannot read them: their device nodes are not passed in, and the host's device rules block them even when created by hand. Herakles recognises the container. `herakles devices`, the wizard and the job editor mark those disks as *unavailable*, and a disk backup fails with an explanation instead of a bare "no such file". What works:
+
+* **The whole container as files**, the full backup of a container. Choose *This whole container* in the wizard, or use a job with `paths: [/]`. `/proc`, `/sys`, `/dev`, `/run` and other kernel and memory file systems are left out by themselves; their mount points are kept, so a restore gives a complete root file system. The local repository is never stored inside its own backup. With `one_file_system: true`, volumes mounted into the container (Proxmox `mp0`) are left out.
+* **An image of the container's volume, made on the host**, e.g. `/dev/pve/vm-101-disk-0` on Proxmox LVM. A ZFS subvolume has no block device; back it up as files.
+* **A disk passed into the container** (Proxmox: `dev0: /dev/sdb`, LXC: `lxc.cgroup2.devices.allow` plus a mount entry). It shows up as available and is imaged as usual.
+
 ---
 
 ## Repository format (v1)
@@ -441,6 +449,7 @@ The suite covers:
 * Docker: discovery, data sets, database detection, dumps and loads against a fake docker CLI; per-project backup, restore in dumps and files mode, rollback, fresh-host restore; plus a manual integration run against real Postgres, MariaDB and MongoDB containers.
 * Web mode: setup link, password and passkey logins, throttling, roles, secret redaction, Host/CSRF checks; a Playwright run with a virtual authenticator.
 * Databases: dump plan, streaming into the snapshot, failed dumps left out, restore into a new database (fake tools); plus a manual run against real PostgreSQL 15, MariaDB 10.11, MongoDB 7 and SQLite (backup, in-place and side-by-side restore, roles, socket and password logins, server down).
+* Containers: detection, unavailable host disks, backup of `/` with kernel file systems skipped, the repository left out of its own backup; plus a manual run in a container on a real host (host disks refused with an explanation, a passed-in partition imaged, the whole container backed up, restored and compared).
 * Desktop sharing of the system service: share file, status, one-time login tickets.
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 

@@ -77,3 +77,7 @@ func deviceSize(f *os.File) (int64, error) {
 
 // DeviceOf returns 0 on Windows (one_file_system uses volume names instead).
 func DeviceOf(fi os.FileInfo) uint64 { return 0 }
+
+// PseudoFS reports whether path is on a kernel or memory file system
+// (only detected on Linux).
+func PseudoFS(path string) bool { return false }

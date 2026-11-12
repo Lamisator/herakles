@@ -15,8 +15,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	"github.com/lamisator/herakles/internal/blockdev"
 	"github.com/lamisator/herakles/internal/chunker"
 	"github.com/lamisator/herakles/internal/fsutil"
 	"github.com/lamisator/herakles/internal/id"
@@ -190,7 +192,10 @@ func prefixPath(abs string, parts []string, n int) string {
 func (a *Archiver) buildVTree() (*vnode, []string, error) {
 	root := &vnode{children: map[string]*vnode{}}
 	var paths []string
-	add := func(p string, device bool) error {
+	// add adds a source; sub marks the top-level entries of a backup of /,
+	// which are not listed in the snapshot's paths.
+	var add func(p string, device, sub bool) error
+	add = func(p string, device, sub bool) error {
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			return err
@@ -198,7 +203,13 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 		if device {
 			abs = p // keep device paths verbatim (e.g. \\.\PhysicalDrive0)
 		}
-		paths = append(paths, abs)
+		if !device && runtime.GOOS != "windows" && abs == "/" {
+			paths = append(paths, abs)
+			return a.addRoot(root, add)
+		}
+		if !sub {
+			paths = append(paths, abs)
+		}
 		parts := splitAbs(abs)
 		if device && runtime.GOOS == "windows" && strings.HasPrefix(p, `\\.\`) {
 			parts = []string{"devices", strings.TrimSuffix(strings.TrimPrefix(p, `\\.\`), ":")}
@@ -236,12 +247,12 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 		if abs, err := filepath.Abs(p); err == nil && a.filter.Excluded(abs) {
 			continue
 		}
-		if err := add(p, false); err != nil {
+		if err := add(p, false, false); err != nil {
 			return nil, nil, err
 		}
 	}
 	for _, d := range a.opts.Devices {
-		if err := add(d, true); err != nil {
+		if err := add(d, true, false); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -273,6 +284,40 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 		return nil, nil, errors.New("nothing to back up: no paths or devices given")
 	}
 	return root, paths, nil
+}
+
+// addRoot backs up the whole file system: every top-level entry becomes a
+// source, so database dumps can still sit next to them. Mount points of
+// kernel and memory file systems (/proc, /sys, /dev, /run, …) and, with
+// one_file_system, of other file systems are kept as empty directories.
+func (a *Archiver) addRoot(root *vnode, add func(string, bool, bool) error) error {
+	rfi, err := os.Lstat("/")
+	if err != nil {
+		return err
+	}
+	ents, err := os.ReadDir("/")
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		p := "/" + e.Name()
+		if a.filter.Excluded(p) {
+			continue
+		}
+		fi, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		if fi.IsDir() && (fsutil.PseudoFS(p) && fsutil.DeviceOf(fi) != fsutil.DeviceOf(rfi) ||
+			a.opts.OneFileSystem && fsutil.DeviceOf(fi) != fsutil.DeviceOf(rfi)) {
+			root.children[e.Name()] = &vnode{children: map[string]*vnode{}, realPath: p}
+			continue
+		}
+		if err := add(p, false, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Run performs the backup and saves the snapshot.
@@ -504,6 +549,17 @@ func (a *Archiver) dirExcluded(path string) bool {
 	return false
 }
 
+// emptyDir stores a directory without its contents.
+func (a *Archiver) emptyDir(ctx context.Context, path string, fi os.FileInfo) (*repository.Node, error) {
+	n := fsutil.NodeFromInfo(path, fi)
+	sub, err := a.repo.SaveTree(ctx, &repository.Tree{})
+	if err != nil {
+		return nil, fatalError{err}
+	}
+	n.Subtree = &sub
+	return n, nil
+}
+
 func (a *Archiver) saveDir(ctx context.Context, path string, fi os.FileInfo, pnode *repository.Node, dev uint64) (*repository.Node, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -546,6 +602,15 @@ func (a *Archiver) saveDir(ctx context.Context, path string, fi os.FileInfo, pno
 		switch {
 		case cfi.IsDir():
 			if a.opts.OneFileSystem && dev != 0 && fsutil.DeviceOf(cfi) != dev {
+				continue
+			}
+			if fsutil.DeviceOf(cfi) != fsutil.DeviceOf(fi) && fsutil.PseudoFS(cp) {
+				// A kernel or memory file system: keep the mount point only.
+				n, err := a.emptyDir(ctx, cp, cfi)
+				if err != nil {
+					return nil, err
+				}
+				slots = append(slots, slot{node: n})
 				continue
 			}
 			if a.dirExcluded(cp) {
@@ -803,6 +868,9 @@ func (a *Archiver) saveStream(ctx context.Context, st *Stream) (node *repository
 func (a *Archiver) saveDevice(ctx context.Context, path string) (*repository.Node, error) {
 	f, size, err := fsutil.OpenDevice(path)
 	if err != nil {
+		if ct := blockdev.Container(); ct != "" && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.EPERM)) {
+			err = fmt.Errorf("%w: Herakles runs in a container (%s), which cannot read disks the host has not passed in; back up the container's files instead (paths: [/]), see 'herakles devices'", err, ct)
+		}
 		return nil, err
 	}
 	f.Close()
@@ -874,6 +942,9 @@ func (a *Archiver) scanPath(ctx context.Context, root string) {
 		if d.IsDir() {
 			if p != root {
 				if a.dirExcluded(p) {
+					return filepath.SkipDir
+				}
+				if fi, err := d.Info(); err == nil && fsutil.DeviceOf(fi) != dev && fsutil.PseudoFS(p) {
 					return filepath.SkipDir
 				}
 				if a.opts.OneFileSystem && dev != 0 {

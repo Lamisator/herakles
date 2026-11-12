@@ -263,6 +263,32 @@ func TestTUIWizard(t *testing.T) {
 	t.Fatal("first backup did not run")
 }
 
+// The tests run in a container themselves; the wizard must not offer
+// "This whole container" unless a test asks for it.
+func init() { inContainer = func() string { return "" } }
+
+func TestTUIWizardContainer(t *testing.T) {
+	inContainer = func() string { return "lxc" }
+	defer func() { inContainer = func() string { return "" } }()
+	listDevices = func() ([]blockdev.Device, error) {
+		return []blockdev.Device{{Name: "sda", Path: "/dev/sda", Type: "disk", Size: 1 << 40, Unavailable: "not passed into the container (lxc)"}}, nil
+	}
+	defer func() { listDevices = blockdev.List }()
+	h := start(t)
+	h.rune('w')
+	h.waitFor("This whole container")
+	h.waitFor("A disk passed into the container")
+	h.key(tcell.KeyDown, 0)
+	h.key(tcell.KeyDown, 0)
+	h.key(tcell.KeyEnter, 0)
+	h.waitFor("Leave out mounted volumes")
+	h.wizClick("Back")
+	h.waitFor("What do you want to back up?")
+	h.key(tcell.KeyDown, 0)
+	h.key(tcell.KeyEnter, 0)
+	h.waitFor("marked UNAVAILABLE")
+}
+
 func TestTUIWizardDisk(t *testing.T) {
 	listDevices = func() ([]blockdev.Device, error) {
 		return []blockdev.Device{

@@ -26,6 +26,9 @@ type Device struct {
 	USB       bool     `json:"usb,omitempty"`
 	ReadOnly  bool     `json:"read_only,omitempty"`
 	System    bool     `json:"system,omitempty"` // holds the running system (/, /boot, /usr, swap) or contains such a device
+	// Unavailable says why the device cannot be read here, e.g. a host
+	// disk seen from inside a container.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 // ErrUnsupported is returned where discovery is not implemented; enter

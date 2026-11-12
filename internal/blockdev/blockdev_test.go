@@ -29,7 +29,7 @@ func link(t *testing.T, target, p string) {
 // USB stick, a LUKS volume with LVM on the USB stick, a loop device.
 func fakeSystem(t *testing.T) linuxRoots {
 	d := t.TempDir()
-	r := linuxRoots{filepath.Join(d, "sys"), filepath.Join(d, "dev"), filepath.Join(d, "udev"), filepath.Join(d, "mountinfo"), filepath.Join(d, "swaps")}
+	r := linuxRoots{filepath.Join(d, "sys"), filepath.Join(d, "dev"), filepath.Join(d, "udev"), filepath.Join(d, "mountinfo"), filepath.Join(d, "swaps"), false}
 	blk := filepath.Join(r.sys, "block")
 	dev := func(name, num, size string) string {
 		dir := filepath.Join(blk, name)

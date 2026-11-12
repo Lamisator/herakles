@@ -23,7 +23,7 @@ func (s *Server) wizardRoutes(mux *http.ServeMux) {
 		home, _ := os.UserHomeDir()
 		host, _ := os.Hostname()
 		out := map[string]any{"os": runtime.GOOS, "home": home, "hostname": host, "root": os.Geteuid() == 0,
-			"config_dir": filepath.Dir(s.eng.Config().Path())}
+			"config_dir": filepath.Dir(s.eng.Config().Path()), "container": blockdev.Container()}
 		dc := &docker.Client{}
 		for _, j := range s.eng.Config().Jobs {
 			if j.Docker != nil && j.Docker.Binary != "" {
@@ -54,7 +54,7 @@ func (s *Server) wizardRoutes(mux *http.ServeMux) {
 			writeJSON(w, 200, map[string]any{"devices": []blockdev.Device{}, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"devices": devs, "root": os.Geteuid() == 0})
+		writeJSON(w, 200, map[string]any{"devices": devs, "root": os.Geteuid() == 0, "container": blockdev.Container()})
 	})
 	// Store a repository password in a file next to the configuration
 	// (mode 0600) and return its path for password_file.

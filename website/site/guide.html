@@ -39,7 +39,8 @@
     <li><a href="#background">Running in the background</a>
       <ol><li><a href="#tray">Tray icon</a></li><li><a href="#desktop-service">Desktop with the system service</a></li><li><a href="#service">System service</a></li><li><a href="#daemon-control">Controlling the daemon</a></li></ol></li>
     <li><a href="#restore">Finding and restoring</a></li>
-    <li><a href="#disks">Disks and partitions</a></li>
+    <li><a href="#disks">Disks and partitions</a>
+      <ol><li><a href="#disks-container">Inside a container</a></li></ol></li>
     <li><a href="#server">Repository server</a>
       <ol><li><a href="#server-setup">Setting it up</a></li><li><a href="#server-clients">Connecting clients</a></li><li><a href="#nas">On a NAS (QNAP, Synology)</a></li><li><a href="#server-vs-share">Server or network share?</a></li></ol></li>
     <li><a href="#docker">Docker Compose projects</a>
@@ -465,6 +466,23 @@ DEVICE                      SIZE        DESCRIPTION                             
   /dev/sdb1                 28.90 GiB   partition · exfat "STICK"                     /dev/disk/by-id/usb-SanDisk_Ultra_Fit_4C53…-part1</pre>
 <p>Jobs store the <strong>stable path</strong>: <code>/dev/sdb1</code> can become <code>/dev/sdc1</code> after a reboot or when another disk is plugged in, the <code>by-id</code> name cannot. Devices marked <em>system</em> hold the running system (/, /boot, swap) and change while they are read. On Windows the list shows <code>\\.\C:</code> volumes and <code>\\.\PhysicalDrive0</code> disks; reading them needs an administrator terminal.</p>
 <div class="note"><p><strong>Consistency:</strong> an image of a mounted, changing file system can be inconsistent. Back up unmounted or read-only file systems, or create an LVM, ZFS or btrfs snapshot in a <a href="#hooks"><code>before</code> hook</a> and image that. <code>--force</code> is required to overwrite a block device, and the target must not be mounted.</p></div>
+<h3 id="disks-container">Inside a container (LXC, Docker, Podman)</h3>
+<p>A container sees the host's disks in <code>/sys</code>, but cannot read them: the device nodes are not passed in, and the host's device rules block them even when created by hand. Herakles recognises the container: <code>herakles devices</code>, the wizard and the job editor mark those disks as <em>unavailable</em>, and a disk backup fails with an explanation. What works instead:</p>
+<table>
+<tr><th>Way</th><th>How</th></tr>
+<tr><td><strong>The whole container as files</strong> (the full backup of a container)</td><td>Choose <em>This whole container</em> in the wizard, or use a job with <code>paths: [/]</code>. <code>/proc</code>, <code>/sys</code>, <code>/dev</code>, <code>/run</code> and other kernel and memory file systems are left out by themselves. Their mount points are kept, so a restore gives a complete root file system. The repository is never stored in its own backup. With <code>one_file_system: true</code>, volumes mounted into the container (Proxmox <code>mp0</code>) are left out.</td></tr>
+<tr><td><strong>An image of the container's volume</strong></td><td>Run Herakles on the host and image the volume, e.g. <code>/dev/pve/vm-101-disk-0</code> on Proxmox LVM. A ZFS subvolume has no block device; back it up as files.</td></tr>
+<tr><td><strong>A disk passed into the container</strong></td><td>Proxmox: <code>dev0: /dev/sdb</code> in the container's configuration; plain LXC: <code>lxc.cgroup2.devices.allow</code> plus a mount entry. The disk shows up as available and is imaged as usual.</td></tr>
+</table>
+<pre>jobs:
+  - name: container
+    repository: nas
+    paths: [/]
+    exclude: ["/tmp/*", "/var/tmp/*"]
+    exclude_caches: true
+    databases: [{ type: postgres }]   <span class="c"># databases inside as consistent dumps</span>
+    schedule: [{ cron: "30 2 * * *" }]</pre>
+
 
 <h2 id="server">Repository server</h2>
 <p>The repository server is optional. It stores repositories for other computers over HTTPS, so clients need neither a network share nor SSH access. The server only stores encrypted data: it never sees passwords, keys or file contents.</p>

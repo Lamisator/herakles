@@ -64,6 +64,18 @@ func TestPlans(t *testing.T) {
 	}
 }
 
+func TestSystemPlan(t *testing.T) {
+	cfg := config.New(filepath.Join(t.TempDir(), "h.yaml"))
+	p := &Plan{Kind: System, OneFS: true, Repo: "r", Schedule: "nightly", Keep: "standard", Name: DefaultName(System, cfg)}
+	j, err := p.Job("r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Name != "container" || len(j.Paths) != 1 || j.Paths[0] != "/" || !j.OneFileSystem || !j.ExcludeCaches || len(j.Exclude) != len(SystemExcludes) {
+		t.Fatalf("%+v", j)
+	}
+}
+
 func TestPasswords(t *testing.T) {
 	pw := GeneratePassword()
 	if !regexp.MustCompile(`^[A-Za-z2-9]{6}(-[A-Za-z2-9]{6}){3}$`).MatchString(pw) || pw == GeneratePassword() {

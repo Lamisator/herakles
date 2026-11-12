@@ -22,7 +22,14 @@ const (
 	Files  = "files"
 	Docker = "docker"
 	Disk   = "disk"
+	// System backs up the whole file system as files: the full backup of
+	// a container, which cannot read the host's disks.
+	System = "system"
 )
+
+// SystemExcludes are left out of a whole-system backup besides the kernel
+// and memory file systems, which are skipped by themselves.
+var SystemExcludes = []string{"/tmp/*", "/var/tmp/*", "/var/cache/apt/archives/*.deb", "/var/cache/dnf", "/var/cache/pacman/pkg", "/swapfile", "/swap.img"}
 
 // Storage types of a new repository.
 const (
@@ -108,7 +115,7 @@ func GeneratePassword() string {
 
 // DefaultName suggests a job name that is not taken.
 func DefaultName(kind string, cfg *config.Config) string {
-	base := map[string]string{Files: "files", Docker: "containers", Disk: "disk"}[kind]
+	base := map[string]string{Files: "files", Docker: "containers", Disk: "disk", System: "container"}[kind]
 	if base == "" {
 		base = "backup"
 	}
@@ -227,6 +234,11 @@ func (p *Plan) Job(repo string) (*config.Job, error) {
 			p.Docker = &config.DockerJob{}
 		}
 		j.Docker = p.Docker
+	case System:
+		j.Paths = []string{"/"}
+		j.Exclude = append([]string{}, SystemExcludes...)
+		j.ExcludeCaches = true
+		j.OneFileSystem = p.OneFS
 	case Disk:
 		if strings.TrimSpace(p.Device) == "" {
 			return nil, errors.New("enter the device")

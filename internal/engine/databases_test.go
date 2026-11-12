@@ -137,3 +137,27 @@ func TestSQLitePlan(t *testing.T) {
 		t.Fatalf("%+v %v", dumps, err)
 	}
 }
+
+// A backup that contains the local repository does not store it in itself.
+func TestRepositoryLeftOut(t *testing.T) {
+	e, src := setup(t)
+	dir := filepath.Dir(src)
+	cfg := e.Config()
+	cfg.Jobs = append(cfg.Jobs, &config.Job{Name: "all", Repository: "main", Paths: []string{dir}})
+	res, err := e.RunJob(context.Background(), "all", RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, _, err := e.OpenByName(context.Background(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	snap, _ := repo.FindSnapshot(context.Background(), res.Snapshot, repository.SnapshotFilter{})
+	if _, err := repo.FindNode(context.Background(), snap.Tree, filepath.Join(dir, "src")); err != nil {
+		t.Fatal("source missing:", err)
+	}
+	if _, err := repo.FindNode(context.Background(), snap.Tree, filepath.Join(dir, "repo")); err == nil {
+		t.Fatal("the repository was backed up into itself")
+	}
+}

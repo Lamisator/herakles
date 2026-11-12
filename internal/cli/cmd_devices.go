@@ -27,6 +27,8 @@ func (a *App) devicesCmd() *cobra.Command {
 			if a.jsonOut {
 				return a.printJSON(devs)
 			}
+			ct := blockdev.Container()
+			blocked := 0
 			depth := map[string]int{}
 			tw := tabwriter.NewWriter(a.out, 0, 2, 2, ' ', 0)
 			fmt.Fprintln(tw, "DEVICE\tSIZE\tDESCRIPTION\tSTABLE PATH")
@@ -40,9 +42,33 @@ func (a *App) devicesCmd() *cobra.Command {
 				if stable == "" || stable == d.Path {
 					stable = "-"
 				}
-				fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", strings.Repeat("  ", n), d.Path, ui.Bytes(int64(d.Size)), d.Describe(), stable)
+				desc := d.Describe()
+				if d.Unavailable != "" {
+					desc = "unavailable: " + d.Unavailable + " · " + desc
+					blocked++
+				}
+				fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", strings.Repeat("  ", n), d.Path, ui.Bytes(int64(d.Size)), desc, stable)
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if ct != "" && blocked > 0 {
+				a.printf("\n%s\n", containerHint(ct))
+			}
+			return nil
 		},
 	}
+}
+
+// containerHint explains why disks cannot be imaged from a container and
+// what to do instead.
+func containerHint(ct string) string {
+	return fmt.Sprintf(`Herakles runs in a container (%s). It sees the host's disks but cannot read
+them: the host does not pass them in. Instead:
+  - back up the whole container as files: a job with paths: [/]
+    (the wizard's "This whole container"); /proc, /sys, /dev and /run
+    are left out by themselves;
+  - or image the container's volume on the host, with Herakles running there
+    (e.g. /dev/pve/vm-101-disk-0 on Proxmox);
+  - or pass a disk into the container (Proxmox: dev0: /dev/sdb) to image it.`, ct)
 }

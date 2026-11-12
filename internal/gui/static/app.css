@@ -313,3 +313,9 @@ h2.set-section .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
 .dump-list { width: auto; margin: 4px 0 10px; }
 .dump-list td { padding: 4px 12px 4px 0; vertical-align: middle; }
 .dump-list .icon { vertical-align: -3px; }
+.dev-row.unavailable { opacity: .55; cursor: not-allowed; }
+.dev-row.unavailable:hover { border-color: var(--border); }
+.dev-pick .note { border: 1px solid var(--border); border-left: 3px solid var(--accent-2); border-radius: 8px; padding: 4px 12px; margin-bottom: 10px; }
+.dev-pick .note p { margin: 6px 0; }
+.plain-list { margin: 8px 0 12px; padding-left: 20px; }
+.plain-list li { margin: 4px 0; }

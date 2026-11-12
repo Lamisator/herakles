@@ -15,9 +15,10 @@ type linuxRoots struct {
 	udev      string // /run/udev/data
 	mountinfo string // /proc/self/mountinfo
 	swaps     string // /proc/swaps
+	access    bool   // check that the device nodes can be opened
 }
 
-var defaultRoots = linuxRoots{"/sys", "/dev", "/run/udev/data", "/proc/self/mountinfo", "/proc/swaps"}
+var defaultRoots = linuxRoots{"/sys", "/dev", "/run/udev/data", "/proc/self/mountinfo", "/proc/swaps", true}
 
 func listLinux(r linuxRoots) ([]Device, error) {
 	ents, err := os.ReadDir(filepath.Join(r.sys, "block"))
@@ -98,6 +99,12 @@ func listLinux(r linuxRoots) ([]Device, error) {
 			}
 			add(Device{Name: p.Name(), Path: filepath.Join(r.dev, p.Name()), Type: "part", Parent: name,
 				Removable: d.Removable, USB: d.USB}, pdir)
+		}
+	}
+	if r.access {
+		ct := Container()
+		for i := range out {
+			out[i].Unavailable = unavailable(out[i].Path, ct)
 		}
 	}
 	return out, nil

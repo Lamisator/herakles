@@ -1266,7 +1266,8 @@ views.wizard = async main => {
       h('div', { class: 'tiles' },
         tile('folder', 'Files & folders', 'Documents, home directories, server data. Permissions and timestamps are kept.', wz.kind === 'files', () => pick('files')),
         tile('containers', 'Docker containers', info.docker ? info.docker_projects + ' projects found on this host. Each one is backed up and restored on its own, databases included.' : 'Docker Compose projects with volumes and database dumps. (Docker was not found on this computer.)', wz.kind === 'docker', () => pick('docker')),
-        tile('disk', 'A whole disk or partition', 'An image for disaster recovery that can be written back to a disk.', wz.kind === 'disk', () => pick('disk')))],
+        info.container ? tile('server', 'This whole container', 'Every file of this container (' + info.container + '), to restore it completely. This is the full backup of a container.', wz.kind === 'system', () => pick('system')) : null,
+        tile('disk', 'A whole disk or partition', info.container ? 'Only for disks the host passes into this container: a container cannot read the host\'s disks.' : 'An image for disaster recovery that can be written back to a disk.', wz.kind === 'disk', () => pick('disk')))],
 
     sources: () => {
       if (wz.kind === 'docker') {
@@ -1274,6 +1275,15 @@ views.wizard = async main => {
         return [h('h2', {}, icon('containers'), 'Which containers?'),
           h('div', { class: 'sub' }, 'Choose all projects, pick them one by one, or name folders (such as /srv) whose projects — including future ones — are backed up automatically. Files in those folders that belong to no project are backed up too.'),
           wz.dock.el];
+      }
+      if (wz.kind === 'system') {
+        return [h('h2', {}, icon('server'), 'The whole container'),
+          h('div', { class: 'sub' }, 'Backs up / with everything in it, so the container can be restored completely: into a new container or onto its own volume.'),
+          h('ul', { class: 'plain-list' },
+            h('li', {}, 'Left out by themselves: /proc, /sys, /dev, /run and other kernel and memory file systems (their mount points are kept).'),
+            h('li', {}, 'Also left out: the contents of /tmp and /var/tmp, package caches and folders marked with CACHEDIR.TAG.'),
+            h('li', {}, 'Databases are best added as dumps afterwards (Backup Jobs → Edit → Databases): a running database\'s files may be inconsistent.')),
+          check('oneFS', 'Only the container\'s own file system (leave out volumes mounted into it)')];
       }
       if (wz.kind === 'disk') {
         return [h('h2', {}, icon('disk'), 'Which disk or partition?'),
@@ -1368,14 +1378,14 @@ views.wizard = async main => {
         tile('shield', 'Keep everything', 'Nothing is ever removed automatically.', wz.keep === 'all', () => { wz.keep = 'all'; render(); }))],
 
     finish: () => {
-      if (!wz.name) wz.name = uniqueName({ files: 'files', docker: 'containers', disk: 'disk' }[wz.kind] || 'backup');
+      if (!wz.name) wz.name = uniqueName({ files: 'files', docker: 'containers', disk: 'disk', system: 'container' }[wz.kind] || 'backup');
       const job = buildJob();
       const repoLabel = wz.repoMode === 'existing' ? wz.repo + ' (' + (repos.find(r => r.name === wz.repo) || {}).location + ')' : repoDraft().name + ' — ' + repoDraft().location + ' (new)';
       const row = (ic, k, v) => h('div', { class: 'summary-row' }, icon(ic), h('div', {}, h('div', { class: 'k' }, k), h('div', {}, v)));
       return [h('h2', {}, icon('done'), 'Check and create'),
         h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Name of the job'), input('name')), h('div', {}, h('label', {}, 'Description (optional)'), input('description'))),
         h('div', { style: 'margin-top:14px' },
-          row(wz.kind === 'docker' ? 'containers' : wz.kind === 'disk' ? 'disk' : 'folder', 'Backs up', describeSources(job)),
+          row(wz.kind === 'docker' ? 'containers' : wz.kind === 'disk' ? 'disk' : wz.kind === 'system' ? 'server' : 'folder', 'Backs up', describeSources(job)),
           row('repos', 'Stores in', repoLabel),
           wz.repoMode === 'new' ? row('lock', 'Encryption', wz.pwMode === 'ask' ? 'Password asked for each session' : 'Password stored in a file next to the configuration') : null,
           row('clock', 'Runs', { nightly: 'every night at ' + wz.time + ', full every 7 days', weekly: 'Sundays full, Monday to Saturday incremental, at ' + wz.time, hourly: 'every 4 hours, full every 7 days', manual: 'only when started' }[wz.schedule]),
@@ -1397,6 +1407,7 @@ views.wizard = async main => {
       return parts.join('; ');
     }
     if (job.devices && job.devices.length) return job.devices.join(', ');
+    if (job.paths.length === 1 && job.paths[0] === '/') return 'the whole container (/)' + (job.one_file_system ? ', without mounted volumes' : '');
     return job.paths.join(', ') + (job.exclude && job.exclude.length ? ' (leaving out ' + job.exclude.length + ' patterns)' : '');
   }
 
@@ -1417,6 +1428,8 @@ views.wizard = async main => {
     return r;
   }
 
+  const SYSTEM_EXCLUDES = ['/tmp/*', '/var/tmp/*', '/var/cache/apt/archives/*.deb', '/var/cache/dnf', '/var/cache/pacman/pkg', '/swapfile', '/swap.img'];
+
   function buildJob() {
     const [hh, mm] = (wz.time || '02:00').split(':').map(Number);
     const at = (mm || 0) + ' ' + (hh || 0);
@@ -1429,6 +1442,11 @@ views.wizard = async main => {
       if (wz.excl.downloads) ex.push('**/Downloads', '**/.local/share/Trash', '**/$RECYCLE.BIN');
       ex.push(...wz.customExcl.split('\n').map(x => x.trim()).filter(Boolean));
       job.exclude = ex;
+      job.one_file_system = !!wz.oneFS;
+    } else if (wz.kind === 'system') {
+      job.paths = ['/'];
+      job.exclude = [...SYSTEM_EXCLUDES];
+      job.exclude_caches = true;
       job.one_file_system = !!wz.oneFS;
     } else if (wz.kind === 'disk') {
       job.devices = [wz.device.trim()];
@@ -2034,14 +2052,15 @@ function devicePicker(opts) {
       const key = d.stable || d.path;
       const on = chosen.has(d.path) || chosen.has(key);
       if (on && chosen.has(d.path) && key !== d.path) { chosen.delete(d.path); chosen.add(key); }
-      const box = h('input', { type: opts.multi ? 'checkbox' : 'radio', name: 'dev-pick', checked: on });
-      const row = h('label', { class: 'dev-row' + (on ? ' on' : '') + (d.system ? ' system' : ''), style: 'margin-left:' + depth[d.name] * 22 + 'px' },
+      const box = h('input', { type: opts.multi ? 'checkbox' : 'radio', name: 'dev-pick', checked: on, disabled: !!d.unavailable && !on });
+      const row = h('label', { class: 'dev-row' + (on ? ' on' : '') + (d.system ? ' system' : '') + (d.unavailable ? ' unavailable' : ''), title: d.unavailable ? 'Cannot be read here: ' + d.unavailable : null, style: 'margin-left:' + depth[d.name] * 22 + 'px' },
         box, icon(d.usb ? 'usb' : d.type === 'crypt' ? 'lock' : d.type === 'lvm' || d.type === 'raid' ? 'repos' : 'disk', 'dev-ico'),
         h('div', { class: 'dev-main' },
           h('div', {}, h('b', { class: 'mono' }, d.path), ' ', h('span', { class: 'muted' }, fmtBytes(d.size)), ' ',
             h('span', { class: 'chip' }, (d.usb ? 'USB ' : '') + (DEV_KIND[d.type] || d.type)),
             d.system ? h('span', { class: 'chip warn', title: 'This device holds the running system and changes while it is read. Prefer a file backup, or image it from a rescue system.' }, 'system') : null,
-            d.read_only ? h('span', { class: 'chip' }, 'read-only') : null),
+            d.read_only ? h('span', { class: 'chip' }, 'read-only') : null,
+            d.unavailable ? h('span', { class: 'chip warn' }, d.unavailable) : null),
           h('div', { class: 'meta' }, [d.model, d.fstype === 'swap' && (d.mounts || []).includes('[SWAP]') ? '' : d.fstype ? d.fstype + (d.label ? ' “' + d.label + '”' : '') : d.label ? '“' + d.label + '”' : '',
             (d.mounts || []).filter(m => m !== '[SWAP]').length ? 'mounted at ' + d.mounts.filter(m => m !== '[SWAP]').join(', ') : (d.mounts || []).includes('[SWAP]') ? 'swap in use' : ''].filter(Boolean).join(' · ') || ' '),
           key !== d.path ? h('div', { class: 'meta mono dev-stable', title: 'Saved in the job under this name, which stays the same when disks are added or reordered' }, '↳ ' + key) : null));
@@ -2061,6 +2080,9 @@ function devicePicker(opts) {
     manual.value = others.join('\n');
     if (r.error || !devs.length) { clear(list).append(h('div', { class: 'muted' }, r.error || 'No disks found. Enter the device name below.')); return; }
     render();
+    if (r.container && devs.some(d => d.unavailable)) list.prepend(h('div', { class: 'note' },
+      h('p', {}, icon('info'), ' Herakles runs in a container (' + r.container + '). It sees the host\'s disks but cannot read them unless the host passes them in (Proxmox: ', h('code', {}, 'dev0: /dev/sdb'), ').'),
+      h('p', {}, 'For a full backup of this container, back up its files instead: choose ', h('b', {}, 'This whole container'), ' in the wizard (a job with the path ', h('code', {}, '/'), '). To image the container\'s volume, run Herakles on the host.')));
     if (!r.root && !win) list.append(h('p', { class: 'muted' }, icon('info'), ' Reading a device needs root: run the daemon (or the backup) as root.'));
   }).catch(e => { clear(list).append(h('div', { class: 'muted' }, e.message)); manual.value = [...chosen].join('\n'); });
   return el;
