@@ -165,10 +165,9 @@ verified 1180 files</pre>
       <button role="tab" data-tab="macos" aria-selected="false">Install on macOS</button>
     </div>
     <div class="os-panel" data-panel="packages">
-<pre><span class="c"># Debian, Ubuntu, Fedora, RHEL/Rocky/Alma, openSUSE, Arch: adds the signed repository and installs</span>
-curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh
-<span class="c"># desktop: backups run as root in the service (whole disks, all files); then open "Herakles" from the menu</span>
-sudo herakles daemon desktop on</pre>
+<pre><span class="c"># Debian, Ubuntu, Fedora, RHEL/Rocky/Alma, openSUSE, Arch: adds the signed repository,</span>
+<span class="c"># installs, then asks: desktop or server, and sets it up</span>
+curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh</pre>
       <p style="color:var(--muted)">Updates then arrive with <code>apt upgrade</code>, <code>dnf upgrade</code>, <code>zypper up</code> or <code>pacman -Syu</code>. Packages for x86‑64, ARM64 and ARMv7, signed with key <code>1035 012D 5247 A80F D798 8DFD E64E FE56 44EE 8226</code> (<a href="herakles.asc">herakles.asc</a>). Setting it up by hand is described in the <a href="guide.html#install">guide</a>.</p>
     </div>
     <div class="os-panel" data-panel="linux" hidden>

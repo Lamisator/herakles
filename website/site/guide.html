@@ -70,7 +70,7 @@
 <tr><td><code>herakles &lt;command&gt;</code></td><td>The command line interface (CLI): <code>backup</code>, <code>restore</code>, <code>snapshots</code> and so on.</td></tr>
 <tr><td><code>herakles gui</code></td><td>The desktop interface. It runs locally and opens in an app window or your browser.</td></tr>
 <tr><td><code>herakles tray</code></td><td>Scheduled backups plus the desktop interface plus a tray icon. The easiest way to use Herakles on a desktop.</td></tr>
-<tr><td><code>herakles tui</code></td><td>A full-screen terminal interface, for servers and SSH sessions.</td></tr>
+<tr><td><code>herakles tui</code></td><td>A full-screen terminal interface, for servers and SSH sessions. <code>--wizard</code> opens the backup wizard right away.</td></tr>
 <tr><td><code>herakles daemon</code></td><td>The background service that runs scheduled backups, installable as a systemd or Windows service.</td></tr>
 <tr><td><code>herakles server</code></td><td>The optional repository server that stores backups of other computers.</td></tr>
 </table>
@@ -81,6 +81,14 @@
 <h3 id="packages">Linux packages</h3>
 <p>One command adds the signed repository for your distribution and installs the package:</p>
 <pre>curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh</pre>
+<p>Then it asks how you will use Herakles and sets that up:</p>
+<ul>
+  <li><strong>Desktop</strong> (suggested when the computer has a graphical login): the system service is shared with you (<a href="#desktop-service"><code>herakles daemon desktop on</code></a>), and on request the tray icon starts at every login. Open <em>Herakles</em> from the applications menu; the wizard guides you through the first backup. Backups run as root, so whole disks and all files work.</li>
+  <li><strong>Desktop, only my own files</strong>: Herakles runs as you, with the tray icon at login.</li>
+  <li><strong>Server without a desktop</strong>: the backup wizard opens in the terminal (<code>herakles tui --wizard</code>); afterwards the service is enabled and started.</li>
+  <li><strong>Nothing now</strong>: only install, and print the next steps.</li>
+</ul>
+<p>Without a terminal, or to skip the questions, set the answer in advance: <code>curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo HERAKLES_MODE=server sh</code> (<code>desktop</code>, <code>user</code>, <code>server</code> or <code>none</code>; add <code>HERAKLES_USER=name</code> for the desktop modes if you are not using sudo).</p>
 <p>It supports Debian and Ubuntu (apt), Fedora, RHEL, Rocky and Alma Linux (dnf), openSUSE (zypper) and Arch Linux (pacman), on x86‑64, ARM64 and ARMv7. Repository metadata and packages are signed with the key <code>1035012D5247A80FD7988DFDE64EFE5644EE8226</code> (<a href="herakles.asc">herakles.asc</a>, binary: <a href="herakles.gpg">herakles.gpg</a>). To set it up by hand:</p>
 <pre><span class="c"># Debian / Ubuntu</span>
 sudo install -d -m 755 /etc/apt/keyrings

@@ -63,8 +63,11 @@ var tabs = []struct{ key, name, title string }{
 }
 
 // Run starts the TUI on the terminal.
-func Run(ctx context.Context, eng *engine.Engine, version string) error {
+func Run(ctx context.Context, eng *engine.Engine, version string, wizard bool) error {
 	u := New(ctx, eng, version)
+	if wizard {
+		u.startWizard()
+	}
 	return u.app.Run()
 }
 

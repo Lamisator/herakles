@@ -46,7 +46,14 @@ On Linux, install the package from the signed repository on https://herakles.klo
 curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh
 ```
 
-It ships `/usr/bin/herakles`, a menu entry, shell completions and `herakles.service` (not enabled). Binaries for all platforms are on the same site.
+It ships `/usr/bin/herakles`, a menu entry, shell completions and `herakles.service`. Afterwards the script asks how Herakles will be used and sets it up:
+
+* **Desktop** (default when a graphical session is installed): shares the system service with your user (`herakles daemon desktop on`), optionally turns on the tray icon at login; then open *Herakles* from the menu. Backups run as root, so whole disks and all files work.
+* **Desktop, only your own files**: Herakles runs as your user (tray autostart).
+* **Server**: starts the backup wizard in the terminal (`herakles tui --wizard`), then enables and starts `herakles.service`.
+* **Nothing**: install only and print the next steps.
+
+Without a terminal, or to skip the questions, set `HERAKLES_MODE=desktop|user|server|none` (and `HERAKLES_USER` if sudo did not set `SUDO_USER`): `curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo HERAKLES_MODE=server sh`. Binaries for all platforms are on the same site.
 
 To build it yourself you need Go 1.26 or newer:
 

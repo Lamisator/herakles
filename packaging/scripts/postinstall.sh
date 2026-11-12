@@ -8,7 +8,8 @@ if [ -d /run/systemd/system ]; then
   # Upgrade: a running daemon picks up the new version.
   systemctl try-restart herakles.service >/dev/null 2>&1 || true
 fi
-if [ ! -e /etc/herakles/herakles.yaml ]; then
+# install.sh asks and sets up itself.
+if [ ! -e /etc/herakles/herakles.yaml ] && [ -z "${HERAKLES_INSTALLER:-}" ]; then
   echo "Herakles is installed. Next steps:"
   echo "  sudo herakles daemon desktop on   desktop: backups run as a root service (whole disks,"
   echo "                                    all files); open them from the \"Herakles\" menu entry"

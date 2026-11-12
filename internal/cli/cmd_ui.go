@@ -8,14 +8,17 @@ import (
 )
 
 func (a *App) tuiCmd() *cobra.Command {
-	return &cobra.Command{
+	var wizard bool
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive terminal interface (dashboard, configuration, browse & restore)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return tui.Run(cmd.Context(), a.eng, Version)
+			return tui.Run(cmd.Context(), a.eng, Version, wizard)
 		},
 	}
+	cmd.Flags().BoolVar(&wizard, "wizard", false, "start with the backup wizard")
+	return cmd
 }
 
 func (a *App) guiCmd() *cobra.Command {
