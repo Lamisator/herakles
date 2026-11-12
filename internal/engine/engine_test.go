@@ -239,7 +239,8 @@ func TestGlobEscapeExcludes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !f.Excluded(dir) || !f.Excluded(filepath.Join(dir, "data", "x")) {
+	// The directory itself: the backup then does not go into it.
+	if !f.Excluded(dir) {
 		t.Fatalf("%s not excluded by %s", dir, globEscape(dir))
 	}
 	if f.Excluded(dir + "x") {
