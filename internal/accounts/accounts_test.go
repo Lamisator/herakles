@@ -3,6 +3,7 @@ package accounts
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -27,7 +28,8 @@ func TestStore(t *testing.T) {
 	if _, err := s.Create("Marius", RoleUser, "another password"); err != ErrExists {
 		t.Fatal("names must be unique ignoring case:", err)
 	}
-	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+	// Windows has no file modes: the folder's ACL protects the file.
+	if st, _ := os.Stat(path); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatal("store file mode", st.Mode())
 	}
 	if _, err := s.Authenticate("MARIUS", "correct horse battery"); err != nil {

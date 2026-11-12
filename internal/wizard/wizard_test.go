@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"testing"
 
 	"github.com/lamisator/herakles/internal/config"
@@ -86,7 +87,8 @@ func TestPasswords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+	// Windows has no file modes: the folder's ACL protects the file.
+	if st, _ := os.Stat(p); runtime.GOOS != "windows" && st.Mode().Perm() != 0o600 {
 		t.Fatal(st.Mode())
 	}
 	// A retry with the same password reuses the file.

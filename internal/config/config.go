@@ -292,16 +292,17 @@ func (d *DockerJob) Selects(name string, dirs ...string) bool {
 	return d.InFolders(dirs...) != ""
 }
 
-// InFolders returns the first of Folders that contains one of dirs.
+// InFolders returns the first of Folders that contains one of dirs. Docker
+// paths are Linux paths, also in a configuration checked on Windows.
 func (d *DockerJob) InFolders(dirs ...string) string {
 	for _, f := range d.Folders {
-		f = filepath.Clean(f)
+		f = path.Clean(f)
 		for _, dir := range dirs {
 			if dir == "" {
 				continue
 			}
-			dir = filepath.Clean(dir)
-			if dir == f || strings.HasPrefix(dir, strings.TrimSuffix(f, string(filepath.Separator))+string(filepath.Separator)) {
+			dir = path.Clean(dir)
+			if dir == f || strings.HasPrefix(dir, strings.TrimSuffix(f, "/")+"/") {
 				return f
 			}
 		}
@@ -833,7 +834,7 @@ func (c *Config) Validate() error {
 		}
 		if j.Docker != nil {
 			for _, f := range j.Docker.Folders {
-				if !filepath.IsAbs(f) {
+				if !path.IsAbs(f) { // Linux paths (Docker), also on Windows
 					add("job %q: docker.folders must be absolute paths, got %q", j.Name, f)
 				}
 			}

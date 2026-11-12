@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,7 +28,16 @@ func TestDetectDB(t *testing.T) {
 	}
 }
 
+// Docker backups read the host side of Linux bind mounts; Docker Desktop
+// on Windows keeps them inside its VM, so these only apply on Linux.
+func linuxOnly(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Docker backups need a Linux Docker host")
+	}
+}
+
 func TestDataDir(t *testing.T) {
+	linuxOnly(t)
 	pg := docker.Container{Mounts: []docker.Mount{
 		{Type: "bind", Source: "/srv/app/conf", Destination: "/etc/app"},
 		{Type: "bind", Source: "/srv/app/pgdata", Destination: "/var/lib/postgresql/data"},
@@ -251,6 +261,7 @@ func TestScanSkipsDirsInsideProjects(t *testing.T) {
 }
 
 func TestProjectHomeGrowsToBindMounts(t *testing.T) {
+	linuxOnly(t)
 	dir := t.TempDir()
 	bw := filepath.Join(dir, "srv", "docker", "bitwarden", "bwdata")
 	for _, d := range []string{"docker", "core", "mssql/data", "env", "logs/api"} {

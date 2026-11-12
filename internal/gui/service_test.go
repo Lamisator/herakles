@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,8 @@ func TestServiceShare(t *testing.T) {
 	if err := daemon.WriteDesktopShare(me, daemon.DesktopShare{GUI: inst.Base, Token: inst.Token}); err != nil {
 		t.Fatal(err)
 	}
-	if fi, err := os.Stat(daemon.DesktopPath(me.Uid)); err != nil || fi.Mode().Perm() != 0o600 {
+	// On Windows an ACL limits the file to the user (no file modes).
+	if fi, err := os.Stat(daemon.DesktopPath(me.Uid)); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("share file: %v %v", fi, err)
 	}
 	sh, err := daemon.SharedDesktop()

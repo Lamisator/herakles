@@ -3,6 +3,7 @@ package blockdev
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -85,6 +86,9 @@ func fakeSystem(t *testing.T) linuxRoots {
 }
 
 func TestListLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("parses Linux sysfs and /dev symlinks")
+	}
 	r := fakeSystem(t)
 	devs, err := listLinux(r)
 	if err != nil {
