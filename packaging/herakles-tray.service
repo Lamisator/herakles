@@ -1,0 +1,18 @@
+# Installed by the herakles package: the tray icon as a systemd user unit,
+# so it comes back by itself when it crashes and after updates. The login
+# autostart entry and the "Herakles" menu entry ('herakles tray') start
+# it; "Hide icon" / "Quit Herakles" stop it until it is started again.
+[Unit]
+Description=Herakles tray icon
+Documentation=https://herakles.kloeck-it.de/guide.html#tray
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/herakles tray
+Environment=HERAKLES_TRAY_UNIT=1
+Restart=on-failure
+RestartSec=5
+# Exit status 75: restart after an update.
+RestartForceExitStatus=75

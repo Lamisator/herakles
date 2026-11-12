@@ -99,15 +99,22 @@ as_user() { # as_user NAME command...: run as the desktop user with their HOME
 }
 
 # start_tray NAME: start the tray icon now in NAME's running desktop session
-# (autostart only takes effect at the next login). It runs as a transient
-# systemd user unit, which has the session's DISPLAY/WAYLAND_DISPLAY.
+# (autostart only takes effect at the next login): the user unit
+# herakles-tray.service, which systemd restarts when it crashes, or else a
+# transient unit. The session's systemd has its DISPLAY/WAYLAND_DISPLAY.
 start_tray() {
   rt=/run/user/$(id -u "$1")
   [ -S "$rt/bus" ] || return 1
   pgrep -u "$1" -f "herakles tray" >/dev/null 2>&1 && return 0
+  command -v systemctl >/dev/null 2>&1 || return 1
+  if [ -e /usr/lib/systemd/user/herakles-tray.service ] &&
+    as_user "$1" env XDG_RUNTIME_DIR="$rt" DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus" \
+      systemctl --user start herakles-tray.service >/dev/null 2>&1; then
+    return 0
+  fi
   if command -v systemd-run >/dev/null 2>&1 &&
     as_user "$1" env XDG_RUNTIME_DIR="$rt" DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus" \
-      systemd-run --user --quiet --collect --unit=herakles-tray herakles tray >/dev/null 2>&1; then
+      systemd-run --user --quiet --collect --unit=herakles-tray-now herakles tray >/dev/null 2>&1; then
     return 0
   fi
   return 1

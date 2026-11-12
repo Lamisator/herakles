@@ -114,8 +114,13 @@ func (u *updater) install() error {
 	return nil
 }
 
-// startNew starts the new tray, which waits until this one has ended.
+// startNew starts the new tray, which waits until this one has ended. In
+// the tray's systemd unit, systemd starts it instead.
 func (u *updater) startNew() error {
+	if inTrayUnit() {
+		restartForUpdate = true
+		return nil
+	}
 	exe := u.method.Exe
 	if exe == "" {
 		var err error

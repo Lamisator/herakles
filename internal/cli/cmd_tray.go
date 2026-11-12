@@ -44,7 +44,19 @@ Starting it a second time opens the window of the running instance.`,
 				waitForExit(after)
 			}
 			update.CleanOld()
-			return a.runTray(cmd.Context(), openNow)
+			if a.startTrayUnit() {
+				// The unit runs the tray; open its window once it is up.
+				if openNow {
+					return a.openRunningTray(cmd.Context())
+				}
+				return nil
+			}
+			err := a.runTray(cmd.Context(), openNow)
+			if err == nil && restartForUpdate && inTrayUnit() {
+				// systemd starts the new version (RestartForceExitStatus).
+				return exitError{code: exitRestart}
+			}
+			return err
 		},
 	}
 	cmd.Flags().BoolVar(&openNow, "open", false, "open the GUI window right away")
@@ -254,6 +266,35 @@ func (a *App) waitSharedDesktop(ctx context.Context) (*daemon.DesktopShare, erro
 	return nil, err
 }
 
+// exitRestart asks the tray's systemd unit to start the tray again.
+const exitRestart = 75
+
+// restartForUpdate is set when the tray ends for an update.
+var restartForUpdate bool
+
+// openRunningTray opens the window of the tray that is starting or running
+// (the system service's when it is shared, else the tray's own).
+func (a *App) openRunningTray(ctx context.Context) error {
+	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); {
+		if sh, err := daemon.SharedDesktop(); err == nil {
+			u, err := sh.OpenURL()
+			if err != nil {
+				return err
+			}
+			return openWindow(u)
+		}
+		if url := a.runningGUI(); url != "" {
+			return openWindow(url)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return errors.New("the Herakles tray started but its window does not answer; see: journalctl --user -u " + "herakles-tray")
+}
+
 // trayLog sends the tray's messages to tray.log in the state directory
 // (the previous run's file is kept as tray.log.1).
 func (a *App) trayLog() *os.File {
@@ -316,7 +357,10 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	topts := tray.Options{Status: status, Open: open, Quit: func() {}, QuitLabel: "Hide icon", QuitHint: "Remove the tray icon; backups keep running in the system service",
+	hidden := func() {
+		_ = tray.Notify("Herakles icon hidden", "Backups keep running in the system service. Open Herakles from the applications menu to show the icon again.")
+	}
+	topts := tray.Options{Status: status, Open: open, Quit: hidden, QuitLabel: "Hide icon", QuitHint: "Remove the tray icon; backups keep running in the system service",
 		Warn: func(msg string) { fmt.Fprintln(a.err, "warning:", msg) }}
 	// The update replaces the program the service runs too; the package or
 	// the setup restarts the service.
