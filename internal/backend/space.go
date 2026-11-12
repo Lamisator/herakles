@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+
+	"github.com/hirochachacha/go-smb2"
 )
 
 // Space is the capacity of the storage a repository lives on. With Quota
@@ -90,7 +92,15 @@ func (f smbFS) space(p string) (Space, error) {
 			return Space{}, err
 		}
 	}
-	return Space{Total: st.BlockSize() * st.TotalBlockCount(), Free: st.BlockSize() * st.AvailableBlockCount()}, nil
+	return smbSpace(st), nil
+}
+
+// smbSpace converts SMB's FileFsFullSizeInformation. Sizes come in
+// allocation units of BytesPerSector × SectorsPerAllocationUnit; go-smb2
+// calls these BlockSize and FragmentSize.
+func smbSpace(st smb2.FileFsInfo) Space {
+	unit := st.BlockSize() * max(st.FragmentSize(), 1)
+	return Space{Total: unit * st.TotalBlockCount(), Free: unit * st.AvailableBlockCount()}
 }
 
 // Space asks the Herakles server for the repository's quota, or the free
