@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"slices"
@@ -18,6 +22,7 @@ import (
 	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/sysutil"
+	"github.com/lamisator/herakles/internal/window"
 )
 
 // windowsSetupCmd is what the Windows installer (herakles-setup.exe) runs
@@ -172,8 +177,75 @@ func (a *App) windowsSetupCmd() *cobra.Command {
 			return nil
 		},
 	}
-	root.AddCommand(install, uninstall, restart)
+	webview := &cobra.Command{
+		Use:   "webview",
+		Short: "Install the WebView2 runtime for the Herakles window, if missing",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if window.Available() {
+				a.printf("the WebView2 runtime is installed\n")
+				return nil
+			}
+			a.printf("installing the WebView2 runtime for the Herakles window…\n")
+			if err := installWebView2(cmd.Context()); err != nil {
+				return fmt.Errorf("WebView2 runtime: %w (Herakles opens in the web browser instead)", err)
+			}
+			a.printf("installed the WebView2 runtime\n")
+			return nil
+		},
+	}
+	root.AddCommand(install, uninstall, restart, webview)
 	return root
+}
+
+// webView2Bootstrapper is Microsoft's small installer that downloads and
+// installs the Evergreen WebView2 runtime (part of Windows 11; missing on
+// Windows Server and some Windows 10 systems).
+const webView2Bootstrapper = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+func installWebView2(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, webView2Bootstrapper, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download: %s", resp.Status)
+	}
+	dir, err := os.MkdirTemp("", "herakles-webview2")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	p := filepath.Join(dir, "MicrosoftEdgeWebview2Setup.exe")
+	f, err := os.Create(p)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, io.LimitReader(resp.Body, 64<<20))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := sysutil.VerifyMicrosoftSignature(p); err != nil {
+		return err
+	}
+	out, err := exec.CommandContext(ctx, p, "/silent", "/install").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v %s", err, strings.TrimSpace(string(out)))
+	}
+	if !window.Available() {
+		return errors.New("still not installed after running Microsoft's installer")
+	}
+	return nil
 }
 
 // setupService prepares the machine-wide configuration, shares the window

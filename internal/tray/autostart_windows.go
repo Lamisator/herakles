@@ -72,11 +72,22 @@ var (
 
 // DetachConsole closes the console window when it was opened only for this
 // process (started from Explorer or at login), so the tray runs without a
-// window. Started from a terminal, the console is kept.
-func DetachConsole() {
+// window. Started from a terminal, the console is kept. It reports whether
+// the console was closed: output then goes nowhere.
+func DetachConsole() bool {
 	var pids [2]uint32
 	n, _, _ := procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&pids[0])), 2)
 	if n == 1 {
-		_, _, _ = procFreeConsole.Call()
+		r, _, _ := procFreeConsole.Call()
+		return r != 0
 	}
+	return false
+}
+
+// ErrorBox shows an error to a user who has no console.
+func ErrorBox(title, msg string) {
+	t, _ := windows.UTF16PtrFromString(title)
+	m, _ := windows.UTF16PtrFromString(msg)
+	const mbIconError, mbSetForeground = 0x10, 0x10000
+	_, _ = windows.MessageBox(0, m, t, mbIconError|mbSetForeground)
 }

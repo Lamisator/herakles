@@ -14,3 +14,6 @@ func available() error { return nil }
 func hostReady(context.Context, time.Duration) bool { return true }
 
 const noHostWarning = ""
+
+// promoteIcon is Windows only.
+func promoteIcon(context.Context) {}

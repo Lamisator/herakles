@@ -21,6 +21,9 @@ contents:
   - src: ${PKG_BINARY}
     dst: /usr/bin/herakles
     file_info: {mode: 0755}
+  - src: ${PKG_WINDOW}
+    dst: /usr/lib/herakles/herakles-window
+    file_info: {mode: 0755}
   - src: packaging/herakles.service
     dst: /usr/lib/systemd/system/herakles.service
     file_info: {mode: 0644}
@@ -45,6 +48,16 @@ contents:
   - dst: /etc/herakles
     type: dir
     file_info: {mode: 0700}
+# herakles-window shows the GUI in a window of its own with WebKitGTK;
+# without it Herakles opens in the browser. Only suggested: servers do not
+# need GTK (install.sh installs it for desktops).
+overrides:
+  deb:
+    suggests: [libwebkit2gtk-4.1-0]
+  rpm:
+    suggests: [webkit2gtk4.1]
+  archlinux:
+    suggests: ["webkit2gtk-4.1: the Herakles window instead of the browser"]
 scripts:
   postinstall: packaging/scripts/postinstall.sh
   preremove: packaging/scripts/preremove.sh

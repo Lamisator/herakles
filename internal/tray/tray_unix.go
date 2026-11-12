@@ -41,3 +41,6 @@ func hostReady(ctx context.Context, timeout time.Duration) bool {
 }
 
 const noHostWarning = "the desktop has no system tray (StatusNotifierItem host) yet; the icon appears once one starts. On GNOME install the \"AppIndicator and KStatusNotifierItem Support\" extension"
+
+// promoteIcon is Windows only.
+func promoteIcon(context.Context) {}

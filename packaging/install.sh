@@ -121,6 +121,20 @@ tray_on() { # tray_on NAME: tray at every login, and now if NAME is logged in
   fi
 }
 
+# window_libs: WebKitGTK for the Herakles window (herakles-window); without
+# it Herakles opens in the web browser. Only desktops get it, not servers.
+window_libs() {
+  [ -x /usr/lib/herakles/herakles-window ] || return 0
+  say "Installing WebKitGTK for the Herakles window"
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y libwebkit2gtk-4.1-0
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y webkit2gtk4.1
+  elif command -v yum >/dev/null 2>&1; then yum install -y webkit2gtk4.1
+  elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install libwebkit2gtk-4_1-0
+  elif command -v pacman >/dev/null 2>&1; then pacman -S --noconfirm --needed webkit2gtk-4.1
+  fi || echo "WebKitGTK could not be installed; Herakles opens in the web browser instead."
+}
+
 # A desktop is likely if a graphical session type or display manager exists.
 default_mode=server
 if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != root ] && { ls /usr/share/xsessions/*.desktop >/dev/null 2>&1 || ls /usr/share/wayland-sessions/*.desktop >/dev/null 2>&1; }; then
@@ -164,6 +178,7 @@ case "$MODE" in
 desktop)
   has_systemd || die "the system service needs systemd; choose 'user' (HERAKLES_MODE=user) instead"
   desktop_user
+  window_libs
   say "Sharing the system service with $DUSER"
   herakles daemon desktop on --user "$DUSER" >/dev/null
   ask "Show the Herakles icon in the tray after every login of $DUSER? [Y/n]" y
@@ -178,6 +193,7 @@ EOT
   ;;
 user)
   desktop_user
+  window_libs
   ask "Start Herakles in the tray after every login of $DUSER? [Y/n]" y
   if is_yes "$REPLY"; then tray_on "$DUSER"; fi
   cat <<EOT

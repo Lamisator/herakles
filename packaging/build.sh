@@ -40,8 +40,9 @@ for sh in bash zsh fish; do "$host" completion $sh > "$gen/herakles.$sh"; done
 declare -A archdir=([amd64]=x86_64 [arm64]=aarch64 [arm7]=armv7h)
 for a in amd64 arm64 arm7; do
   bin=$DIST/herakles-$TAG-linux-${a%7}
+  win=$DIST/herakles-window-$TAG-linux-${a%7}
   for p in deb rpm archlinux; do
-    sed -e "s|\${PKG_ARCH}|$a|; s|\${PKG_VERSION}|$VER|; s|\${PKG_BINARY}|$(realpath "$bin")|; s|\${PKG_GEN}|$gen|g; s|\${PKG_SIGN_KEY}|$SIGNING_DIR/private.asc|" \
+    sed -e "s|\${PKG_ARCH}|$a|; s|\${PKG_VERSION}|$VER|; s|\${PKG_BINARY}|$(realpath "$bin")|; s|\${PKG_WINDOW}|$(realpath "$win")|; s|\${PKG_GEN}|$gen|g; s|\${PKG_SIGN_KEY}|$SIGNING_DIR/private.asc|" \
       packaging/nfpm.yaml > "$gen/nfpm.yaml"
     "${NFPM[@]}" package -f "$gen/nfpm.yaml" -p $p -t "$gen/" >/dev/null
   done

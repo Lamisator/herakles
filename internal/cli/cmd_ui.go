@@ -1,11 +1,36 @@
 package cli
 
 import (
+	"errors"
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/lamisator/herakles/internal/gui"
 	"github.com/lamisator/herakles/internal/tui"
+	"github.com/lamisator/herakles/internal/window"
 )
+
+// windowCmd shows a GUI address in a native window; the tray and 'gui'
+// start it as a process of its own.
+func (a *App) windowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "window [URL]",
+		Short:  "Show a Herakles GUI address in a window of its own",
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			url := os.Getenv(window.URLEnv)
+			if len(args) == 1 {
+				url = args[0]
+			}
+			if url == "" {
+				return errors.New("no address to show")
+			}
+			return window.Show(url)
+		},
+	}
+}
 
 func (a *App) tuiCmd() *cobra.Command {
 	var wizard bool
@@ -26,10 +51,12 @@ func (a *App) guiCmd() *cobra.Command {
 	var noBrowser bool
 	cmd := &cobra.Command{
 		Use:   "gui",
-		Short: "Graphical desktop interface (opens in an app window / browser)",
+		Short: "Graphical desktop interface (opens in a window of its own)",
 		Long: `Start the graphical interface. It is served locally (127.0.0.1 only,
-protected by a random session token) and opened in a Chromium/Edge app window
-or the default browser. Works on Linux and Windows without extra runtime.
+protected by a random session token) and shown in a window of its own:
+WebView2 on Windows, WebKitGTK (herakles-window, libwebkit2gtk-4.1) on Linux.
+Without those it opens in a Chromium/Edge app window or the default browser;
+HERAKLES_BROWSER=1 always uses the browser.
 
 If the system service is shared with you ('sudo herakles daemon desktop on'),
 this opens the service's window instead.`,

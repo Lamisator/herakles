@@ -272,6 +272,15 @@ Section "Herakles" SecMain
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKLM "${UNINSTKEY}" "EstimatedSize" "$0"
 
+  ; The Herakles window needs the WebView2 runtime (part of Windows 11).
+  ; Without it Herakles opens in the web browser, so a failure only shows
+  ; in the details.
+  DetailPrint "Checking the WebView2 runtime…"
+  nsExec::ExecToStack '"$INSTDIR\herakles.exe" windows-setup webview'
+  Pop $0
+  Pop $1
+  DetailPrint "$1"
+
   ${If} $Upgrade == 1
     !insertmacro HeraklesRun "windows-setup restart" "Restarting the Herakles service"
     Return

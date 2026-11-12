@@ -5,6 +5,7 @@ package sysutil
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,6 +46,21 @@ func ProcessAlive(pid int) bool {
 		}
 	}
 	return true
+}
+
+// ProcessIsHerakles reports whether pid runs this program, so a recorded
+// PID that the system gave to another process since does not count. When
+// that cannot be checked, it is assumed.
+func ProcessIsHerakles(pid int) bool {
+	if !ProcessAlive(pid) {
+		return false
+	}
+	exe, err1 := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+	self, err2 := os.Executable()
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	return filepath.Base(strings.TrimSuffix(exe, " (deleted)")) == filepath.Base(self)
 }
 
 // ProgramData is Windows-only; empty elsewhere.

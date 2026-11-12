@@ -38,6 +38,7 @@ import (
 	"github.com/lamisator/herakles/internal/restorer"
 	"github.com/lamisator/herakles/internal/tray"
 	"github.com/lamisator/herakles/internal/update"
+	"github.com/lamisator/herakles/internal/window"
 )
 
 //go:embed static
@@ -215,9 +216,19 @@ func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, er
 	return &Instance{URL: base + "/?token=" + s.token, Base: base, Token: s.token, srv: srv}, nil
 }
 
-// OpenWindow prefers a chromeless Chromium/Edge "app" window and falls back
-// to the default browser.
+// OpenWindow opens the GUI in a native window (WebView2 on Windows,
+// WebKitGTK on Linux). Without one it prefers a chromeless Chromium/Edge
+// "app" window and falls back to the default browser.
 func OpenWindow(url string) error {
+	if os.Getenv("HERAKLES_BROWSER") == "" && window.Open(url) == nil {
+		return nil
+	}
+	return OpenBrowser(url)
+}
+
+// OpenBrowser opens the GUI in a Chromium/Edge "app" window or the default
+// browser.
+func OpenBrowser(url string) error {
 	var candidates []string
 	switch runtime.GOOS {
 	case "windows":

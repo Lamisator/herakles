@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -114,8 +115,20 @@ var openWindow = gui.OpenWindow
 // a second start can open that window instead of failing.
 func guiURLPath(a *App) string { return filepath.Join(a.cfg.GetStateDir(), "gui.url") }
 
-func (a *App) runTray(parent context.Context, openNow bool) error {
-	tray.DetachConsole()
+func (a *App) runTray(parent context.Context, openNow bool) (err error) {
+	if tray.DetachConsole() {
+		// Started from the Start menu or at login: there is no console, so
+		// messages go to a log file and a failure to a message box.
+		if f := a.trayLog(); f != nil {
+			defer f.Close()
+		}
+		defer func() {
+			if err != nil {
+				a.eng.Log.Error("tray stopped", "err", err)
+				tray.ErrorBox("Herakles", "Herakles could not start:\n\n"+err.Error())
+			}
+		}()
+	}
 	if lnk, err := tray.EnsureMenuEntry(a.cfg.GetStateDir()); err != nil {
 		a.eng.Log.Warn("no Start menu entry", "err", err)
 	} else if lnk != "" {
@@ -123,7 +136,7 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	if sh, err := daemon.SharedDesktop(); err == nil {
+	if sh, err := a.waitSharedDesktop(ctx); err == nil {
 		return a.runServiceTray(ctx, sh, openNow)
 	}
 	d, closer, err := a.newDaemon(ctx, func(c *config.Config) { tray.ApplyLogged(c, a.eng.Log) })
@@ -208,6 +221,57 @@ func (a *App) runningGUI() string {
 	return url
 }
 
+// waitSharedDesktop returns the system service's GUI if it is shared with
+// this user. At login and right after an update the service may still be
+// starting (it shares its GUI once it runs): while it is installed, wait
+// for it rather than starting Herakles as this user, whose daemon would
+// then take the service's control port.
+func (a *App) waitSharedDesktop(ctx context.Context) (*daemon.DesktopShare, error) {
+	sh, err := daemon.SharedDesktop()
+	if installed, _ := daemon.SystemServiceState(); err == nil || !installed {
+		return sh, err
+	}
+	a.eng.Log.Info("waiting for the Herakles system service")
+	running := 0
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		if sh, err = daemon.SharedDesktop(); err == nil {
+			return sh, nil
+		}
+		// Running for a while without sharing its GUI with this user.
+		if _, up := daemon.SystemServiceState(); up {
+			if running++; running >= 5 {
+				break
+			}
+		}
+	}
+	a.eng.Log.Info("the system service does not share its window with this user; running Herakles as this user")
+	return nil, err
+}
+
+// trayLog sends the tray's messages to tray.log in the state directory
+// (the previous run's file is kept as tray.log.1).
+func (a *App) trayLog() *os.File {
+	dir := a.cfg.GetStateDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil
+	}
+	p := filepath.Join(dir, "tray.log")
+	_ = os.Rename(p, p+".1")
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil
+	}
+	a.err = f
+	a.eng.Log = slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	a.eng.Log.Info("herakles tray started", "version", Version, "pid", os.Getpid())
+	return f
+}
+
 // trayPIDPath marks a running tray of the system service (one per user).
 func trayPIDPath(a *App) string { return filepath.Join(a.cfg.GetStateDir(), "tray.pid") }
 
@@ -226,7 +290,7 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 	}
 	pidFile := trayPIDPath(a)
 	if b, err := os.ReadFile(pidFile); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid != os.Getpid() && processAlive(pid) {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid != os.Getpid() && sysutil.ProcessIsHerakles(pid) {
 			open()
 			return nil
 		}
@@ -268,6 +332,3 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 	}
 	return nil
 }
-
-// processAlive reports whether pid runs.
-func processAlive(pid int) bool { return sysutil.ProcessAlive(pid) }

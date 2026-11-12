@@ -87,4 +87,8 @@ func Uninstall() ([]string, error) {
 }
 
 // DetachConsole is a no-op outside Windows.
-func DetachConsole() {}
+func DetachConsole() bool { return false }
+
+// ErrorBox is a no-op outside Windows: errors go to the terminal or the
+// journal.
+func ErrorBox(title, msg string) {}

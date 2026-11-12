@@ -111,6 +111,48 @@ func ProcessAlive(pid int) bool {
 	return windows.GetExitCodeProcess(h, &code) == nil && code == stillActive
 }
 
+// ProcessIsHerakles reports whether pid runs this program, so a recorded
+// PID that Windows gave to another process since does not count.
+func ProcessIsHerakles(pid int) bool {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	var code uint32
+	const stillActive = 259
+	if windows.GetExitCodeProcess(h, &code) != nil || code != stillActive {
+		return false
+	}
+	buf := make([]uint16, windows.MAX_PATH)
+	n := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &n); err != nil {
+		return true
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return true
+	}
+	name := strings.ToLower(filepath.Base(windows.UTF16ToString(buf[:n])))
+	// herakles.exe.old: a tray of the version the setup just replaced.
+	return name == strings.ToLower(filepath.Base(self)) || strings.HasPrefix(name, "herakles")
+}
+
+// VerifyMicrosoftSignature checks that the file at p carries a valid
+// Authenticode signature by Microsoft Corporation.
+func VerifyMicrosoftSignature(p string) error {
+	script := `$s = Get-AuthenticodeSignature -LiteralPath $env:HK_FILE; ` +
+		`if ($s.Status -ne 'Valid') { Write-Output ('signature ' + $s.Status); exit 1 }; ` +
+		`if ($s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { Write-Output ('signed by ' + $s.SignerCertificate.Subject); exit 1 }`
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd.Env = append(os.Environ(), "HK_FILE="+p)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s is not signed by Microsoft: %s", filepath.Base(p), strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 // SetUserRun sets (or with an empty command removes) the value name in

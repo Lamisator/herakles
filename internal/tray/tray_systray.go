@@ -64,6 +64,7 @@ func run(ctx context.Context, opts Options) error {
 			last = st
 		}
 		update()
+		go promoteIcon(ctx)
 		go func() {
 			t := time.NewTicker(opts.Interval)
 			defer t.Stop()

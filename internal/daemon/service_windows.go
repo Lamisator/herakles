@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -47,4 +48,25 @@ func runAsService(fn func(ctx context.Context) error) error {
 		return fmt.Errorf("not started by the service control manager: %w", err)
 	}
 	return nil
+}
+
+// SystemServiceState reports whether the system service is installed and
+// running, with rights every user has.
+func SystemServiceState() (installed, running bool) {
+	m, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return false, false
+	}
+	defer windows.CloseServiceHandle(m)
+	name, _ := windows.UTF16PtrFromString(ServiceName)
+	h, err := windows.OpenService(m, name, windows.SERVICE_QUERY_STATUS)
+	if err != nil {
+		return false, false
+	}
+	defer windows.CloseServiceHandle(h)
+	var st windows.SERVICE_STATUS
+	if err := windows.QueryServiceStatus(h, &st); err != nil {
+		return true, false
+	}
+	return true, st.CurrentState == windows.SERVICE_RUNNING
 }

@@ -33,6 +33,9 @@ dist: winres
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 		echo "building $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOARM=7 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/herakles-$(VERSION)-$$os-$$arch$$ext ./cmd/herakles || exit 1; \
+		if [ $$os = linux ]; then \
+			CGO_ENABLED=0 GOARCH=$$arch GOARM=7 go build -trimpath -ldflags "-s -w" -o dist/herakles-window-$(VERSION)-$$os-$$arch ./cmd/herakles-window || exit 1; \
+		fi; \
 	done
 
 clean:

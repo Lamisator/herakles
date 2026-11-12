@@ -73,7 +73,7 @@
 <table>
 <tr><th>Command</th><th>What it is</th></tr>
 <tr><td><code>herakles &lt;command&gt;</code></td><td>The command line interface (CLI): <code>backup</code>, <code>restore</code>, <code>snapshots</code> and so on.</td></tr>
-<tr><td><code>herakles gui</code></td><td>The desktop interface. It runs locally and opens in an app window or your browser.</td></tr>
+<tr><td><code>herakles gui</code></td><td>The desktop interface. It runs locally and opens in a window of its own.</td></tr>
 <tr><td><code>herakles tray</code></td><td>Scheduled backups plus the desktop interface plus a tray icon. The easiest way to use Herakles on a desktop.</td></tr>
 <tr><td><code>herakles tui</code></td><td>A full-screen terminal interface, for servers and SSH sessions. <code>--wizard</code> opens the backup wizard right away.</td></tr>
 <tr><td><code>herakles daemon</code></td><td>The background service that runs scheduled backups, installable as a systemd or Windows service.</td></tr>
@@ -404,7 +404,7 @@ herakles tray autostart on     <span class="c"># start at every login (off / no 
 <p>Autostart is the <code>tray.autostart</code> option in the configuration; the checkbox under <em>Configuration → Desktop</em> in the GUI sets it as well. On Linux it adds an autostart entry and a <em>Herakles Backup</em> launcher to your applications menu; on Windows it uses the <code>Run</code> registry key of your account. Starting Herakles a second time just opens the window of the running one.</p>
 <ul>
   <li><strong>Linux desktops:</strong> KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar and others show the icon directly. <strong>GNOME</strong> needs the <em>AppIndicator and KStatusNotifierItem Support</em> extension.</li>
-  <li><strong>Windows:</strong> the console window closes by itself when the tray starts at login or from Explorer.</li>
+  <li><strong>Windows:</strong> double-clicking <code>herakles.exe</code> starts the tray and opens the window; the console window closes by itself. On Windows 11 Herakles moves its icon out of the overflow menu (<b>^</b>) into the taskbar once; you can hide it again under <em>Settings → Personalization → Taskbar</em>. When the tray uses the system service, it waits for the service after login or an update. Problems are written to <code>tray.log</code> in the state folder (<code>%LOCALAPPDATA%\Herakles</code>) and shown in a message box.</li>
   <li>If there is no desktop at all, <code>herakles tray</code> keeps running as daemon plus GUI and prints the address of the window.</li>
 </ul>
 
@@ -900,7 +900,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
   <li><strong>Logs</strong>: what happened in this session.</li>
 </ol>
 <h3>Desktop interface: <code>herakles gui</code></h3>
-<p>The interface runs inside Herakles and is only reachable from your own computer (<code>127.0.0.1</code>), protected by a random session token. It opens in a Chromium or Edge app window if one is installed, otherwise in your default browser. <code>--no-browser</code> just prints the address; <code>--listen</code> changes the port (default <code>127.0.0.1:7478</code>).</p>
+<p>The interface runs inside Herakles and is only reachable from your own computer (<code>127.0.0.1</code>), protected by a random session token. It opens in a window of its own, no web browser needed: on Windows with WebView2, the web view built into Windows 11 (the setup installs it on Windows 10 and Windows Server if missing); on Linux with WebKitGTK (<code>libwebkit2gtk-4.1</code>, which <code>install.sh</code> installs on desktops). Downloads ask where to save the file. Without these, Herakles uses a Chromium or Edge app window or your default browser; <code>HERAKLES_BROWSER=1</code> always uses the browser. <code>--no-browser</code> just prints the address; <code>--listen</code> changes the port (default <code>127.0.0.1:7478</code>).</p>
 <ul>
   <li><strong>Dashboard</strong>: jobs with <em>Back up now</em>, <em>Full</em>, <em>Incremental</em>, <em>Differential</em>, live progress, daemon state and next run.</li>
   <li><strong>Containers</strong>: Docker Compose projects with containers, databases, last backup, and per-project backup and restore.</li>
