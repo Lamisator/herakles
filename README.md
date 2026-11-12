@@ -238,7 +238,7 @@ It is applied whenever the configuration is saved, from the GUI (checkbox under 
 * Starting it a second time (e.g. from the applications menu) opens the window of the running instance.
 * Unlike the system service, it does not need a stored password: a repository without a password source shows as locked until you unlock it in the GUI; scheduled backups then use the password until you quit.
 * Linux: works with every desktop that supports StatusNotifierItem tray icons (KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar, …). On GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. If the panel starts after Herakles, the icon appears as soon as it is ready. Without a desktop session, it keeps running as daemon + GUI and prints the GUI URL.
-* Windows: autostart uses `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login.
+* Windows: autostart uses `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login. `herakles` without a command (e.g. a double-click on `herakles.exe`) opens the window like `herakles tray --open`; `herakles help` prints the commands.
 * Run either the tray or the daemon service, not both: they share the control port. To use the service from your desktop, see below.
 
 ### Desktop with the system service: `herakles daemon desktop`

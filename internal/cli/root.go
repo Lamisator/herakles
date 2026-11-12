@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -22,10 +23,22 @@ import (
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/engine"
 	"github.com/lamisator/herakles/internal/repository"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 // Version is set at build time via -ldflags.
 var Version = "dev"
+
+// guiByDefault makes 'herakles' without a command open the window (tray
+// mode, like the Start menu entry). On Windows it is usually started by
+// double-clicking herakles.exe; elsewhere it prints the help.
+var guiByDefault = runtime.GOOS == "windows"
+
+func init() {
+	// Cobra refuses to run when started from Explorer ("This is a command
+	// line tool..."); Herakles opens its GUI instead.
+	cobra.MousetrapHelpText = ""
+}
 
 // ExitWarning is returned when a backup finished but some files failed.
 const ExitWarning = 3
@@ -91,10 +104,21 @@ deduplicated, compressed and AES-256 encrypted repositories stored locally,
 on network shares (NFS/SMB/UNC), via SFTP or on a Herakles repository server.
 
 Configuration lives in a YAML file (see 'herakles config example') and can be
-edited interactively with 'herakles tui' or 'herakles gui'.`,
+edited interactively with 'herakles tui' or 'herakles gui'.
+
+On Windows, 'herakles' without a command (e.g. a double-click on
+herakles.exe) opens the window like 'herakles tray --open'.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       Version,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !guiByDefault {
+				return cmd.Help()
+			}
+			update.CleanOld()
+			return a.runTray(cmd.Context(), true)
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return a.setup()
 		},
