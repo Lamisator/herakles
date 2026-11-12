@@ -214,6 +214,8 @@ type JobResult struct {
 	Trigger    string                 `json:"trigger,omitempty"`
 	// Projects holds the per-project results of a Docker job.
 	Projects []ProjectResult `json:"projects,omitempty"`
+	// Databases lists the dumps of the job's databases section.
+	Databases []repository.DatabaseDump `json:"databases,omitempty"`
 }
 
 // RunOptions customise a job run.
@@ -362,7 +364,11 @@ func (e *Engine) runBackup(ctx context.Context, job *config.Job, rc *config.Repo
 	for _, p := range job.Paths {
 		paths = append(paths, config.ExpandHome(p))
 	}
-	u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: paths, Devices: job.Devices}, ro, log)
+	u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: paths, Devices: job.Devices, Databases: true}, ro, log)
+	if u != nil {
+		res.Databases = u.databases
+		res.Error = databaseErrors(u.databases)
+	}
 	if err != nil {
 		return err
 	}
@@ -384,12 +390,15 @@ type unit struct {
 	Devices  []string
 	Excludes []string // in addition to the job's
 	Docker   *repository.DockerInfo
+	// Databases adds the dumps of the job's databases section.
+	Databases bool
 }
 
 type unitResult struct {
 	snap      *repository.Snapshot
 	typ       string
 	forgotten int
+	databases []repository.DatabaseDump
 }
 
 // backupUnit creates one snapshot and applies the job's retention to the
@@ -412,7 +421,17 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	uj.Name = u.Name
 	typ, parent := ResolveType(&uj, ro.Type, snaps, host, time.Now())
 	maxSize, _ := config.ParseSize(job.ExcludeLargerThan)
+	var streams []archiver.Stream
+	var dbs []repository.DatabaseDump
+	if u.Databases && len(job.Databases) > 0 {
+		streams, dbs = e.databaseStreams(ctx, job, log)
+		if len(streams) == 0 && len(u.Paths) == 0 && len(u.Devices) == 0 {
+			lock.Unlock()
+			return &unitResult{databases: dbs}, fmt.Errorf("databases: %s", databaseErrors(dbs))
+		}
+	}
 	a, err := archiver.New(repo, archiver.Options{
+		Streams: streams, Databases: dbs,
 		Paths: u.Paths, Devices: u.Devices, Excludes: append(append([]string(nil), job.Exclude...), u.Excludes...), ExcludeIfPresent: job.ExcludeIfPresent,
 		ExcludeCaches: job.ExcludeCaches, ExcludeLargerThan: maxSize, OneFileSystem: job.OneFileSystem,
 		Type: typ, Parent: parent, Job: u.Name, Hostname: host, Tags: job.Tags, Docker: u.Docker,
@@ -431,9 +450,9 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	snap, err := a.Run(ctx)
 	lock.Unlock()
 	if err != nil {
-		return nil, err
+		return &unitResult{databases: dbs}, err
 	}
-	r := &unitResult{snap: snap, typ: typ}
+	r := &unitResult{snap: snap, typ: typ, databases: dbs}
 	if !job.Retention.Empty() {
 		n, err := e.ApplyRetention(ctx, repo, job.Retention, repository.SnapshotFilter{Job: u.Name, Hostname: host}, ro.DryRunRetention)
 		if err != nil {

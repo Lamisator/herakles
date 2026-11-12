@@ -172,9 +172,9 @@ views.dashboard = async main => {
       const sched = (j.schedule || []).map(s => h('span', { class: 'chip' }, s.cron + ' · ' + (s.type || 'auto')));
       const next = info.daemon ? (info.daemon.schedule || []).find(e => e.kind === 'backup' && e.target === j.name) : null;
       jobsEl.append(h('div', { class: 'card' },
-        h('h3', {}, icon(j.docker ? 'containers' : (j.devices || []).length ? 'disk' : 'folder'), j.name, run ? badge('running') : badge(last && last.status), j.disabled ? h('span', { class: 'chip' }, 'disabled') : null),
+        h('h3', {}, icon(jobIcon(j)), j.name, run ? badge('running') : badge(last && last.status), j.disabled ? h('span', { class: 'chip' }, 'disabled') : null),
         j.description ? h('div', { class: 'meta' }, j.description) : null,
-        h('div', { class: 'meta' }, '→ ', j.repository, ' · ', [...(j.docker ? ['Docker projects'] : []), ...(j.paths || []), ...(j.devices || [])].join(', ')),
+        h('div', { class: 'meta' }, '→ ', j.repository, ' · ', jobSources(j)),
         h('div', { class: 'meta' }, 'Last run: ', last ? ago(last.start) + ' (' + last.type + ')' : 'never',
           last && last.summary ? ' · ' + fmtBytes(last.summary.total_bytes) + ', ' + fmtBytes(last.summary.bytes_stored) + ' stored' : ''),
         last && last.error ? h('div', { class: 'meta', style: 'color:var(--err)' }, last.error) : null,
@@ -292,6 +292,17 @@ views.systems = async main => {
   }
 };
 
+// jobIcon and jobSources describe what a job backs up.
+const dbLabel = d => d.name || d.type;
+function jobIcon(j) {
+  if (j.docker) return 'containers';
+  if ((j.devices || []).length) return 'disk';
+  if ((j.databases || []).length && !(j.paths || []).length) return 'database';
+  return 'folder';
+}
+const jobSources = j => [...(j.docker ? ['Docker projects'] : []), ...(j.paths || []), ...(j.devices || []),
+  ...(j.databases || []).map(d => 'database ' + dbLabel(d))].join(', ');
+
 // ---------- snapshots ----------
 const SNAP_TYPES = [['full', 'Full'], ['incremental', 'Incremental'], ['differential', 'Differential']];
 const TYPE_RANK = { full: 0, differential: 1, incremental: 2 };
@@ -300,6 +311,7 @@ const isDevPath = p => /^\/dev\/|^\\\\\.\\/.test(p);
 function snapKind(s) {
   if (s.docker) return { key: 'docker', icon: s.docker.databases && s.docker.databases.length ? 'database' : 'containers', label: 'Docker project' };
   if ((s.paths || []).length && s.paths.every(isDevPath)) return { key: 'disk', icon: 'disk', label: 'Disk image' };
+  if ((s.databases || []).length && !(s.paths || []).length) return { key: 'database', icon: 'database', label: 'Databases' };
   return { key: 'files', icon: 'folder', label: 'Files and folders' };
 }
 const setKey = s => s.hostname + '\n' + (s.job || 'paths:' + (s.paths || []).join(','));
@@ -401,7 +413,7 @@ views.snapshots = async main => {
       return;
     }
     const multiHost = new Set(sets.map(x => x.latest.hostname)).size > 1;
-    const SECTIONS = [['docker', 'Docker projects', 'containers'], ['disk', 'Disks and partitions', 'disk'], ['files', 'Files and folders', 'folder']];
+    const SECTIONS = [['docker', 'Docker projects', 'containers'], ['database', 'Databases', 'database'], ['disk', 'Disks and partitions', 'disk'], ['files', 'Files and folders', 'folder']];
     for (const [kind, title, ic] of SECTIONS) {
       const mine = sets.filter(x => x.kind.key === kind).sort((a, b) => a.name.localeCompare(b.name) || a.latest.hostname.localeCompare(b.latest.hostname));
       if (!mine.length) continue;
@@ -501,9 +513,11 @@ views.snapshots = async main => {
         extra ? h('span', { class: 'more' }, '+ ' + extra + (extra === 1 ? ' volume' : ' volumes and bind mounts')) : null,
         d.databases && d.databases.length ? h('span', { class: 'chip' }, icon('database'), d.databases.join(', ')) : null);
     }
-    return h('div', { class: 'snap-paths', title: paths.join('\n') }, h('span', { class: 'mono' }, paths[0] || '-'),
+    const dbs = s.databases || [];
+    return h('div', { class: 'snap-paths', title: paths.join('\n') }, paths.length || !dbs.length ? h('span', { class: 'mono' }, paths[0] || '-') : null,
       paths.length > 1 ? h('span', { class: 'more' }, '+ ' + (paths.length - 1) + ' more') : null,
-      k.key === 'disk' ? h('span', { class: 'chip' }, icon('disk'), 'image') : null);
+      k.key === 'disk' ? h('span', { class: 'chip' }, icon('disk'), 'image') : null,
+      dbs.length ? h('span', { class: 'chip', title: dbs.map(dumpName).join('\n') }, icon('database'), dbs.length === 1 ? dumpName(dbs[0]) : dbs.length + ' database dumps') : null);
   };
 
   const details = s => {
@@ -524,8 +538,9 @@ views.snapshots = async main => {
         kv('Tags', (s.tags || []).length ? h('span', {}, s.tags.map(t => h('span', { class: 'chip' }, t))) : null),
         kv('User', s.username),
         kv('Program', s.program_version ? 'Herakles ' + s.program_version : null)),
-      h('div', { class: 'k-head' }, 'Backed-up paths'),
-      h('ul', { class: 'pathlist mono' }, (s.paths || []).map(p => h('li', {}, p))));
+      (s.databases || []).length ? [h('div', { class: 'k-head' }, 'Database dumps'), dumpList(state.snapRepo, s)] : null,
+      (s.paths || []).length ? [h('div', { class: 'k-head' }, 'Backed-up paths'),
+        h('ul', { class: 'pathlist mono' }, s.paths.map(p => h('li', {}, p)))] : null);
   };
 
   let oneHost = false;
@@ -655,7 +670,7 @@ views.jobs = async main => {
   main.append(h('table', {}, h('tr', {}, ['Job', 'Repository', 'Sources', 'Schedule', 'Retention', ''].map(t => h('th', {}, t))),
     jobs.map(j => h('tr', {},
       h('td', {}, h('b', {}, j.name), j.disabled ? ' (disabled)' : ''), h('td', {}, j.repository),
-      h('td', { class: 'wrap' }, [...(j.paths || []), ...(j.devices || [])].join(', ')),
+      h('td', { class: 'wrap' }, jobSources(j)),
       h('td', { class: 'wrap' }, (j.schedule || []).map(s => h('span', { class: 'chip' }, s.cron + ' · ' + (s.type || 'auto')))),
       h('td', { class: 'normal' }, retentionText(j.retention)),
       h('td', {}, h('button', { class: 'small', title: 'Change this job', onclick: () => editJob(j.name) }, 'Edit'), ' ',
@@ -688,6 +703,7 @@ async function editJob(name) {
   const j = orig ? JSON.parse(JSON.stringify(orig)) : { repository: repos[0].name, schedule: [{ cron: '0 2 * * *', type: 'auto' }], full_interval: '7d', retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 12 } };
   const r = j.retention || {};
   const dock = dockerPicker(j);
+  const dbs = databaseEditor(j);
   const f = {
     name: h('input', { value: j.name || '' }), description: h('input', { value: j.description || '' }),
     repository: h('select', {}, repos.map(x => h('option', { value: x.name, selected: x.name === j.repository }, x.name + ' — ' + x.location))),
@@ -739,6 +755,7 @@ async function editJob(name) {
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Paths (one per line)'), f.paths), h('div', {}, h('label', {}, 'Disks / partitions as raw images (one per line)'), f.devices,
         h('button', { type: 'button', class: 'small', style: 'margin-top:6px', onclick: async () => { const v = await chooseDevices(unlines(f.devices.value)); if (v) f.devices.value = v.join('\n'); } }, 'Choose disks…')))),
     dock.el,
+    dbs.el,
     h('fieldset', {}, h('legend', {}, 'Exclusions'),
       h('label', {}, 'Exclude patterns (one per line; *.tmp, **/cache, /abs/path)'), f.exclude,
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Skip dirs containing'), f.excludeIfPresent), h('div', {}, h('label', {}, 'Skip files larger than'), f.excludeLarger)),
@@ -780,7 +797,8 @@ async function editJob(name) {
       for (const k of ['keep_within_hourly', 'keep_within_yearly']) nr[k] = r[k] || '0';
       nj.retention = nr;
       nj.docker = dock.value();
-      if (!nj.docker && !nj.paths.length && !nj.devices.length) { toast('Choose paths, disks or Docker projects to back up', true); return false; }
+      nj.databases = dbs.value();
+      if (!nj.docker && !nj.paths.length && !nj.devices.length && !nj.databases.length) { toast('Choose paths, disks, databases or Docker projects to back up', true); return false; }
       const c = await loadConfig();
       c.jobs = c.jobs || [];
       const i = orig ? c.jobs.findIndex(x => x.name === orig.name) : -1;
@@ -788,6 +806,113 @@ async function editJob(name) {
       await saveConfig(c);
       navigate(state.view);
     } }]);
+}
+
+// ---------- databases ----------
+const DB_TYPES = [['postgres', 'PostgreSQL'], ['mysql', 'MySQL / MariaDB'], ['mongodb', 'MongoDB'], ['sqlite', 'SQLite']];
+const DB_HINTS = {
+  postgres: 'Leave host and user empty for the server on this computer: Herakles dumps it as the system user postgres. Each database becomes one .sql file, plus _globals.sql with the roles.',
+  mysql: 'Leave host and user empty for the server on this computer (root over the socket). Each database becomes one .sql file.',
+  mongodb: 'One archive of the whole server, or one per database listed below. A connection string (uri) can be set in the YAML.',
+  sqlite: 'List the database files (patterns like /var/lib/app/*.db work). Needs the sqlite3 program.',
+};
+const csv = v => v.split(',').map(x => x.trim()).filter(Boolean);
+const dumpName = d => d.path ? d.source + '/' + d.path.split('/').pop().replace(/\.[^.]*$/, '') : d.source;
+
+// databaseEditor is the Databases part of the job editor: one row per
+// server (or SQLite files), with a connection test.
+function databaseEditor(j) {
+  const box = h('div');
+  const add = d => {
+    const type = h('select', {}, DB_TYPES.map(([v, l]) => h('option', { value: v, selected: d.type === v }, l)));
+    const name = h('input', { value: d.name || '', placeholder: 'default: the type' });
+    const host = h('input', { value: d.host || '', placeholder: 'this computer' });
+    const port = h('input', { type: 'number', min: 0, value: d.port || '', placeholder: 'default' });
+    const user = h('input', { value: d.user || '', placeholder: 'default' });
+    const pass = h('input', { type: 'password', value: d.password || '', placeholder: d.password_env || d.password_file || d.password_command ? 'set in the YAML' : 'none', autocomplete: 'new-password' });
+    const list = h('input', { value: (d.databases || []).join(', ') });
+    const excl = h('input', { value: (d.exclude || []).join(', '), placeholder: 'e.g. test_*' });
+    const hint = h('div', { class: 'hint' });
+    const result = h('div', { class: 'hint' });
+    const net = h('div', { class: 'row4' }, h('div', {}, h('label', {}, 'Host or socket'), host), h('div', {}, h('label', {}, 'Port'), port),
+      h('div', {}, h('label', {}, 'User'), user), h('div', {}, h('label', {}, 'Password'), pass));
+    const listLabel = h('label', {});
+    const sync = () => {
+      const sq = type.value === 'sqlite';
+      net.style.display = sq ? 'none' : '';
+      listLabel.textContent = sq ? 'Database files (comma separated)' : 'Only these databases (comma separated; empty = all)';
+      list.placeholder = sq ? '/var/lib/app/app.db' : 'all';
+      hint.textContent = DB_HINTS[type.value];
+    };
+    type.onchange = sync;
+    const row = h('div', { class: 'db-entry' },
+      h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Type'), type), h('div', {}, h('label', {}, 'Name in the backup'), name)),
+      net,
+      h('div', { class: 'row' }, h('div', {}, listLabel, list), h('div', {}, h('label', {}, 'Leave out (comma separated)'), excl)),
+      hint,
+      h('div', { class: 'toolbar' },
+        h('button', { type: 'button', class: 'small', title: 'Connect with these settings and list what would be dumped', onclick: async () => {
+          result.textContent = 'Connecting…';
+          result.className = 'hint';
+          try {
+            const r = await api('POST', '/api/databases/test', row._get());
+            result.textContent = 'Would dump: ' + r.dumps.map(x => (x.database || x.file) + (x.size ? ' (' + fmtBytes(x.size) + ')' : '')).join(', ');
+          } catch (e) { result.textContent = e.message; result.className = 'hint err-text'; }
+        } }, 'Test connection'),
+        h('button', { type: 'button', class: 'small danger', title: 'Stop backing up this database', onclick: () => row.remove() }, 'Remove')),
+      result);
+    row._get = () => {
+      const o = Object.assign({}, d, { type: type.value, name: name.value.trim(), host: host.value.trim(), port: parseInt(port.value, 10) || 0,
+        user: user.value.trim(), password: pass.value, databases: csv(list.value), exclude: csv(excl.value) });
+      for (const k of Object.keys(o)) if (o[k] === '' || o[k] === 0 || (Array.isArray(o[k]) && !o[k].length)) delete o[k];
+      return o;
+    };
+    sync();
+    box.append(row);
+  };
+  (j.databases || []).forEach(add);
+  const el = h('fieldset', {}, h('legend', {}, 'Databases'),
+    h('div', { class: 'hint' }, 'Dumped with the database\'s own tools (pg_dump, mysqldump, mongodump, sqlite3) while it keeps running, and stored in the backup under /herakles-databases. Databases in Docker containers are handled by the Docker section.'),
+    box,
+    h('button', { type: 'button', title: 'Back up a PostgreSQL, MySQL/MariaDB, MongoDB or SQLite database', onclick: () => add({ type: 'postgres' }) }, '+ Add database'));
+  return { el, value: () => [...box.children].map(r => r._get()) };
+}
+
+// dumpList shows the database dumps of a snapshot with download and restore.
+function dumpList(repo, s) {
+  return h('table', { class: 'dump-list' }, (s.databases || []).map(d => h('tr', {},
+    h('td', { class: 'nowrap' }, icon('database'), ' ', h('span', { class: 'mono' }, dumpName(d))),
+    h('td', { class: 'muted' }, (DB_TYPES.find(t => t[0] === d.kind) || [0, d.kind])[1]),
+    d.error ? h('td', { class: 'err-text', colspan: 2 }, 'not dumped: ' + d.error.split('\n')[0]) : [
+      h('td', { class: 'num' }, fmtBytes(d.size)),
+      h('td', { class: 'nowrap' },
+        iconBtn('download', 'Download the dump file', () => startDownload(downloadURL(repo, s.id, [d.path]))),
+        h('button', { class: 'small', title: 'Load this dump back into the database server', onclick: () => dbRestoreDlg(repo, s, d) }, 'Restore…'))])));
+}
+
+// dbRestoreDlg loads a dump into its database server.
+async function dbRestoreDlg(repo, s, d) {
+  const sq = d.kind === 'sqlite';
+  const globals = !d.database && d.kind === 'postgres';
+  const into = h('input', { value: d.database || '', placeholder: d.kind === 'mongodb' ? 'all databases in the dump' : '' });
+  const replace = h('input', { type: 'checkbox' });
+  const what = {
+    postgres: globals ? 'Creates the roles and tablespaces; ones that exist are left as they are.' : 'The database is created if it does not exist. The dump replaces its tables, all or nothing. On a new server, restore ' + d.source + '/_globals first: it creates the roles that own the tables.',
+    mysql: 'The database is created if it does not exist; the dump replaces its tables.',
+    mongodb: 'Collections in the dump replace the existing ones.',
+    sqlite: 'Writes the database file again from the dump.',
+  }[d.kind];
+  await modal('Restore ' + dumpName(d), [
+    h('p', {}, 'Load the dump from the backup of ', fmtTime(s.time), ' into the database server. ', what),
+    globals ? null : [h('label', {}, sq ? 'Database file' : 'Into database'), into,
+      h('div', { class: 'hint' }, sq ? 'Restore into a new file to compare first.' : 'Enter another name to restore next to the current database.')],
+    sq ? h('label', { class: 'check' }, replace, 'Replace the file if it exists') : null], [
+    { label: 'Cancel' },
+    { label: 'Restore', class: 'primary', action: async () => {
+      toast('Restoring ' + dumpName(d) + '…');
+      await api('POST', snapBase(repo, s.id) + '/database-restore', { path: d.path, into: globals ? '' : into.value.trim(), replace: replace.checked });
+      toast('Restored ' + dumpName(d));
+    } }], 'small');
 }
 
 // Docker part of the job editor: choose projects by ticking them, or by

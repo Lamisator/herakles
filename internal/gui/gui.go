@@ -317,6 +317,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/repos/{name}/snapshots/{id}/restore", s.restore)
 	mux.HandleFunc("GET /api/repos/{name}/diff", s.diff)
 	s.dockerRoutes(mux)
+	s.databaseRoutes(mux)
 	s.wizardRoutes(mux)
 	if s.web != nil {
 		s.web.routes(mux)

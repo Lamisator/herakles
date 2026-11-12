@@ -183,12 +183,17 @@ func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *confi
 	// The job's own snapshot: its paths plus whatever in the docker
 	// folders belongs to no project.
 	rest, restExcl := Remainder(job, all)
-	if len(ro.Projects) == 0 && (len(job.Paths) > 0 || len(job.Devices) > 0 || len(rest) > 0) {
+	var dbErr string
+	if len(ro.Projects) == 0 && (len(job.Paths) > 0 || len(job.Devices) > 0 || len(rest) > 0 || len(job.Databases) > 0) {
 		var paths []string
 		for _, p := range job.Paths {
 			paths = append(paths, config.ExpandHome(p))
 		}
-		u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: append(paths, rest...), Devices: job.Devices, Excludes: restExcl}, ro, log)
+		u, err := e.backupUnit(ctx, repo, job, unit{Name: job.Name, Paths: append(paths, rest...), Devices: job.Devices, Excludes: restExcl, Databases: true}, ro, log)
+		if u != nil {
+			res.Databases = u.databases
+			dbErr = databaseErrors(u.databases)
+		}
 		if err != nil {
 			return fmt.Errorf("paths: %w", err)
 		}
@@ -216,6 +221,9 @@ func (e *Engine) runDockerBackup(ctx context.Context, job *config.Job, rc *confi
 	}
 	if len(warned) > 0 {
 		msgs = append(msgs, "projects with warnings: "+strings.Join(warned, ", "))
+	}
+	if dbErr != "" {
+		msgs = append(msgs, dbErr)
 	}
 	res.Error = strings.Join(msgs, "; ")
 	return nil

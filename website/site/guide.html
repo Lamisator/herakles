@@ -44,6 +44,8 @@
       <ol><li><a href="#server-setup">Setting it up</a></li><li><a href="#server-clients">Connecting clients</a></li><li><a href="#nas">On a NAS (QNAP, Synology)</a></li><li><a href="#server-vs-share">Server or network share?</a></li></ol></li>
     <li><a href="#docker">Docker Compose projects</a>
       <ol><li><a href="#docker-setup">Setting it up</a></li><li><a href="#docker-what">What is backed up</a></li><li><a href="#docker-restore">Restoring a project</a></li></ol></li>
+    <li><a href="#databases">Databases</a>
+      <ol><li><a href="#db-setup">Setting it up</a></li><li><a href="#db-restore">Restoring a database</a></li></ol></li>
     <li><a href="#web">Web interface &amp; accounts</a>
       <ol><li><a href="#web-setup">Setting it up</a></li><li><a href="#web-accounts">Accounts and passkeys</a></li><li><a href="#web-proxy">Behind a reverse proxy</a></li></ol></li>
     <li><a href="#replication">Copies and the 3‑2‑1 rule</a></li>
@@ -601,6 +603,74 @@ herakles docker restore wiki --target /tmp/wiki    <span class="c"># only extrac
 <p>If anything fails before the project runs again, the previous data is put back and the project restarted. The default database mode is <strong>dumps</strong> for snapshots taken while running and <strong>files</strong> for snapshots taken with the project stopped. Restores are tested against real Postgres 16, MariaDB 11 and MongoDB 7 containers, including restoring onto a host where the containers, volumes and project directory had been deleted.</p>
 <div class="note"><p>A restore takes an exclusive lock on the repository, so no scheduled backup reads half-restored data. Standalone containers (not created by Compose) are restarted if they still exist; if not, re-create them from <code>inspect.json</code> in the snapshot's metadata.</p></div>
 
+<h2 id="databases">Databases</h2>
+<p>PostgreSQL, MySQL/MariaDB, MongoDB and SQLite installed on the host are backed up as <strong>dumps</strong>, made by the database's own tools while it keeps running. A dump is always consistent, unlike the raw database files of a running server. Dumps are streamed straight into the repository, so they need no temporary disk space. They are deduplicated and compressed like files, so unchanged tables cost almost nothing from one backup to the next. Databases in Docker containers are handled by the <a href="#docker">Docker section</a>.</p>
+
+<h3 id="db-setup">Setting it up</h3>
+<p>Add a <code>databases</code> section to a job. It can stand alone or sit next to <code>paths</code>; everything goes into the same snapshot, with the dumps under <code>/herakles-databases/&lt;name&gt;/</code>.</p>
+<pre>jobs:
+  - name: databases
+    repository: nas
+    databases:
+      - type: postgres                <span class="c"># this computer: dumped as the system user postgres</span>
+      - type: mysql                   <span class="c"># MySQL or MariaDB; this computer: root over the socket</span>
+        exclude: [test_*]
+      - type: postgres
+        name: reporting               <span class="c"># directory in the snapshot (default: the type)</span>
+        host: db.example.com
+        user: backup
+        password_env: PG_BACKUP_PASSWORD
+        databases: [sales, crm]       <span class="c"># default: all</span>
+      - type: sqlite
+        name: app
+        databases: [/var/lib/app/*.db]
+      <span class="c"># - type: mongodb</span>
+      <span class="c">#   uri: mongodb://backup@127.0.0.1:27017/?authSource=admin</span>
+      <span class="c">#   password_file: /etc/herakles/mongo.pw</span>
+    paths: [/etc]                     <span class="c"># optional: files in the same snapshot</span>
+    schedule: [{ cron: "45 1 * * *" }]
+    retention: { keep_daily: 14, keep_monthly: 6 }</pre>
+<table>
+<tr><th>Type</th><th>Dumped with</th><th>In the snapshot</th></tr>
+<tr><td><code>postgres</code></td><td><code>pg_dump</code> (plain SQL) and <code>pg_dumpall --globals-only</code></td><td><code>&lt;db&gt;.sql</code> per database, and <code>_globals.sql</code> with the roles and tablespaces when the user is a superuser</td></tr>
+<tr><td><code>mysql</code></td><td><code>mariadb-dump</code> or <code>mysqldump</code> with <code>--single-transaction</code>, routines, events and triggers</td><td><code>&lt;db&gt;.sql</code> per database; <code>information_schema</code>, <code>performance_schema</code> and <code>sys</code> are left out</td></tr>
+<tr><td><code>mongodb</code></td><td><code>mongodump --archive</code></td><td><code>all.archive</code> for the whole server, or <code>&lt;db&gt;.archive</code> per database listed</td></tr>
+<tr><td><code>sqlite</code></td><td><code>sqlite3 .dump</code></td><td><code>&lt;file&gt;.sql</code> per database file</td></tr>
+</table>
+<h4>Connecting</h4>
+<p>Without connection settings Herakles connects the way the tools do on the server itself. Running as root (the system service), it dumps Postgres as the system user <code>postgres</code> (peer authentication) and MySQL/MariaDB as <code>root</code> over the socket, so a default installation needs no password at all. For other servers set:</p>
+<table>
+<tr><th>Setting</th><th>Meaning</th></tr>
+<tr><td><code>host</code>, <code>port</code></td><td>Host name or IP address and port; a path such as <code>/run/postgresql</code> is a socket directory.</td></tr>
+<tr><td><code>user</code></td><td>Database user. Postgres needs read access to everything (a superuser for the roles), MySQL <code>SELECT</code>, <code>SHOW VIEW</code>, <code>TRIGGER</code>, <code>EVENT</code>, <code>LOCK TABLES</code> and <code>PROCESS</code>.</td></tr>
+<tr><td><code>password</code>, <code>password_file</code>, <code>password_env</code>, <code>password_command</code></td><td>As for repositories. The password never appears on a command line: Postgres gets it in <code>PGPASSWORD</code>, MySQL and MongoDB in a private option file that is removed afterwards.</td></tr>
+<tr><td><code>uri</code></td><td>MongoDB connection string, instead of host, port and user.</td></tr>
+<tr><td><code>databases</code>, <code>exclude</code></td><td>Which databases (names or glob patterns; default all) and which to leave out. For SQLite, <code>databases</code> lists the files.</td></tr>
+<tr><td><code>run_as</code></td><td>Run the tools as this system user.</td></tr>
+<tr><td><code>bin_dir</code></td><td>Where the tools are if they are not on <code>PATH</code>. For Postgres, <code>/usr/lib/postgresql/&lt;version&gt;/bin</code> is found by itself.</td></tr>
+<tr><td><code>options</code></td><td>Extra arguments for the dump tool.</td></tr>
+</table>
+<p>Check the settings before the first run: <code>herakles databases ls</code> connects to every server and lists what would be dumped, with sizes. In the GUI, the job editor has a <strong>Databases</strong> section with <strong>Test connection</strong>.</p>
+<p>A dump that fails (server down, wrong password) is left out of the snapshot instead of storing half of it. The run ends with a warning that names the database, and the other databases and files are still saved. <code>herakles backup</code> prints a line per job such as <code>databases: 9 of 9 dumped (6.5 MiB)</code>.</p>
+
+<h3 id="db-restore">Restoring a database</h3>
+<p>In the GUI, open <strong>Snapshots &amp; Restore</strong>, click a snapshot of the job and find its dumps under <em>Database dumps</em>. <strong>Download</strong> saves the dump file, and <strong>Restore…</strong> loads it back into the server, under its own name or a new one. On the command line:</p>
+<pre>herakles databases restore latest --job databases              <span class="c"># list the dumps of the latest snapshot</span>
+herakles databases restore latest postgres/shop                <span class="c"># load it back into "shop"</span>
+herakles databases restore latest postgres/shop --into shop_check   <span class="c"># next to the current one</span>
+herakles databases restore latest postgres/_globals            <span class="c"># roles first, on a new server</span>
+herakles databases restore 3fa2b1c9 mysql/blog
+herakles databases restore latest app/app --into /tmp/app.db   <span class="c"># SQLite into a new file</span>
+herakles dump latest /herakles-databases/postgres/shop.sql &gt; shop.sql   <span class="c"># just the file</span></pre>
+<table>
+<tr><th>Type</th><th>What a restore does</th></tr>
+<tr><td>Postgres</td><td>Creates the database if it does not exist and replaces the tables in the dump, in one transaction: it applies completely or not at all. On a new server, restore <code>NAME/_globals</code> first; it creates the roles that own the tables. Existing roles are left as they are.</td></tr>
+<tr><td>MySQL/MariaDB</td><td>Creates the database if needed and replaces the tables in the dump.</td></tr>
+<tr><td>MongoDB</td><td>Replaces the collections in the dump. <code>--into</code> picks one database from a whole-server dump, or renames a single-database dump.</td></tr>
+<tr><td>SQLite</td><td>Writes the file from the dump. An existing file is only replaced with <code>--replace</code>, and keeps its owner and permissions.</td></tr>
+</table>
+<p>The restore uses the connection settings of the job's entry, so it goes back to the server the dump came from. Backups and restores are tested against PostgreSQL 15, MariaDB 10.11, MongoDB 7 and SQLite.</p>
+
 <h2 id="web">Web interface &amp; accounts</h2>
 <p>On a server, the daemon can serve the desktop interface on the network, protected by accounts. Users sign in with a password or a passkey (Face ID, Touch ID, Windows Hello, a phone, a password manager or a security key).</p>
 <figure class="tray-pair"><div class="frame"><img src="img/login.webp" loading="lazy" alt="Sign-in page with password and passkey"></div><div class="frame"><img src="img/account.webp" loading="lazy" alt="Account page with a registered passkey"></div></figure>
@@ -702,7 +772,7 @@ herakles copy --from usb-disk --to offsite 2939cbe7</pre>
 <h3>Command line</h3>
 <pre>herakles init | backup | jobs | snapshots | ls | find | diff | restore | restore-device | dump
          forget | prune | check | stats | copy | key | unlock | repair index
-         docker | web | config | daemon | server | tui | gui | tray | version</pre>
+         docker | databases | web | config | daemon | server | tui | gui | tray | version</pre>
 <p>Global options: <code>-c/--config</code>, <code>-r/--repo</code> (a repository name or a location), <code>--password-file</code>, <code>--key-file</code>, <code>--no-prompt</code>, <code>--json</code> (machine-readable output), <code>-q</code>, <code>-v</code>. Exit codes: <code>0</code> success, <code>1</code> error, <code>3</code> backup finished but some files could not be read. Shell completion: <code>herakles completion bash|zsh|fish|powershell</code>.</p>
 <h3>Backup wizard</h3>
 <p>In the GUI under <strong>New backup</strong>, in the terminal UI with <kbd>w</kbd> on the dashboard. Steps: <em>What</em> (files and folders, Docker containers, a disk or partition) → <em>Sources</em> (suggested folders, presets to leave out caches, build folders, downloads; the Docker project picker; the discovered disks and partitions) → <em>Where</em> (an existing repository, or a new one on a local or USB disk, an SMB share, an SFTP server or a Herakles server; the encryption password is generated and shown once, chosen, or asked for each time) → <em>When</em> (every night, weekly full with daily incremental, every 4 hours, manual) → <em>How long</em> (one week, standard, long, everything) → <em>Finish</em> (name, summary, start the first backup). Stored passwords go into <code>&lt;repository&gt;.password</code> next to the configuration with mode 0600.</p>
@@ -841,6 +911,23 @@ jobs:
         type: full
     retention:
       keep_monthly: 6
+
+  - name: databases             # dumps of databases on this host
+    repository: local
+    databases:
+      - type: postgres          # also: mysql (MariaDB), mongodb, sqlite
+        # name: postgres        # directory in the snapshot
+        # host: db.example.com  # default: this computer
+        # port: 5432
+        # user: backup
+        # password_env: PG_PW   # or password, password_file, password_command
+        # databases: [app]      # default: all (sqlite: the files)
+        # exclude: [test_*]
+        # run_as: postgres      # system user for the tools
+        # bin_dir: /usr/lib/postgresql/16/bin
+        # options: [--no-comments]
+    schedule:
+      - cron: "45 1 * * *"
 
   - name: containers            # Docker: one snapshot per Compose project
     repository: local

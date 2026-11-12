@@ -49,6 +49,23 @@ type Options struct {
 	Time time.Time
 	// Docker is stored in the snapshot of a Docker project.
 	Docker *repository.DockerInfo
+	// Streams are stored as files, e.g. database dumps.
+	Streams []Stream
+	// Databases is stored in the snapshot.
+	Databases []repository.DatabaseDump
+}
+
+// Stream is data produced while the backup runs (a command's output),
+// stored as a regular file at Path in the snapshot.
+type Stream struct {
+	Path string // absolute path in the snapshot
+	Size int64  // expected size for the progress display (0: unknown)
+	// Open starts producing the data. Close reports whether all of it
+	// was produced (e.g. the command's exit status); if not, the file is
+	// left out of the snapshot and counted as an error.
+	Open func(ctx context.Context) (io.ReadCloser, error)
+	// Done is called with the result (optional).
+	Done func(size int64, err error)
 }
 
 // Archiver performs one backup.
@@ -132,6 +149,7 @@ type vnode struct {
 	realPath string // filesystem path of this node
 	source   bool   // the node is a backup source (back up everything below)
 	device   bool   // the node is a device to image
+	stream   *Stream
 }
 
 // splitAbs splits an absolute path into components usable as snapshot names.
@@ -227,7 +245,31 @@ func (a *Archiver) buildVTree() (*vnode, []string, error) {
 			return nil, nil, err
 		}
 	}
-	if len(paths) == 0 {
+	for i := range a.opts.Streams {
+		st := &a.opts.Streams[i]
+		parts := splitAbs(st.Path)
+		if len(parts) == 0 {
+			return nil, nil, fmt.Errorf("invalid stream path %q", st.Path)
+		}
+		cur := root
+		for _, part := range parts[:len(parts)-1] {
+			if cur.source || cur.stream != nil {
+				return nil, nil, fmt.Errorf("%s: the path is already used by a backup source", st.Path)
+			}
+			nxt, ok := cur.children[part]
+			if !ok {
+				nxt = &vnode{children: map[string]*vnode{}}
+				cur.children[part] = nxt
+			}
+			cur = nxt
+		}
+		name := parts[len(parts)-1]
+		if cur.source || cur.children[name] != nil {
+			return nil, nil, fmt.Errorf("%s: the path is already used by a backup source", st.Path)
+		}
+		cur.children[name] = &vnode{stream: st, realPath: st.Path}
+	}
+	if len(paths) == 0 && len(a.opts.Streams) == 0 {
 		return nil, nil, errors.New("nothing to back up: no paths or devices given")
 	}
 	return root, paths, nil
@@ -298,6 +340,7 @@ func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 	snap := &repository.Snapshot{
 		Time: snapTime.UTC(), Tree: treeID, Paths: paths, Hostname: a.opts.Hostname, Username: uname,
 		Tags: a.opts.Tags, Job: a.opts.Job, Type: a.opts.Type, Version: Version, Summary: &sum, Docker: a.opts.Docker,
+		Databases: a.opts.Databases,
 	}
 	if a.opts.Parent != nil && a.opts.Type != repository.TypeFull {
 		p := a.opts.Parent.ID()
@@ -351,6 +394,8 @@ func (a *Archiver) saveVDir(ctx context.Context, v *vnode, parent *id.ID) (id.ID
 		var node *repository.Node
 		var err error
 		switch {
+		case child.stream != nil:
+			node, err = a.saveStream(ctx, child.stream)
 		case child.device:
 			node, err = a.saveDevice(ctx, child.realPath)
 		case child.source:
@@ -652,6 +697,22 @@ func (a *Archiver) readContent(ctx context.Context, path string, node *repositor
 	if device {
 		rd = fsutil.NewAlignedReader(f, 1<<20)
 	}
+	content, size, err := a.storeContent(ctx, rd)
+	if err != nil {
+		return err
+	}
+	if !device && size != node.Size {
+		// File changed while reading; record what we actually read.
+		a.addError(path, fmt.Errorf("file changed during backup (size %d -> %d)", node.Size, size))
+	}
+	node.Size = size
+	node.Content = content
+	return nil
+}
+
+// storeContent chunks rd and stores new blobs. Read errors are returned as
+// they are; repository errors are fatal.
+func (a *Archiver) storeContent(ctx context.Context, rd io.Reader) ([]id.ID, uint64, error) {
 	ch := a.chunkers.Get().(*chunker.Chunker)
 	defer a.chunkers.Put(ch)
 	ch.Reset(rd)
@@ -674,7 +735,7 @@ func (a *Archiver) readContent(ctx context.Context, path string, node *repositor
 	for {
 		if err := ctx.Err(); err != nil {
 			wg.Wait()
-			return err
+			return nil, 0, err
 		}
 		buf, err := ch.Next()
 		if err == io.EOF {
@@ -682,7 +743,7 @@ func (a *Archiver) readContent(ctx context.Context, path string, node *repositor
 		}
 		if err != nil {
 			wg.Wait()
-			return err
+			return nil, 0, err
 		}
 		bid := a.repo.BlobID(buf)
 		content = append(content, bid)
@@ -697,21 +758,46 @@ func (a *Archiver) readContent(ctx context.Context, path string, node *repositor
 		case <-ctx.Done():
 			wg.Done()
 			wg.Wait()
-			return ctx.Err()
+			return nil, 0, ctx.Err()
 		}
 	}
 	wg.Wait()
 	if firstErr != nil {
 		a.fatal.CompareAndSwap(nil, &errBox{firstErr})
-		return fatalError{firstErr}
+		return nil, 0, fatalError{firstErr}
 	}
-	if !device && size != node.Size {
-		// File changed while reading; record what we actually read.
-		a.addError(path, fmt.Errorf("file changed during backup (size %d -> %d)", node.Size, size))
+	return content, size, nil
+}
+
+// saveStream stores a stream as a regular file.
+func (a *Archiver) saveStream(ctx context.Context, st *Stream) (node *repository.Node, err error) {
+	var size uint64
+	if st.Done != nil {
+		defer func() { st.Done(int64(size), err) }()
 	}
-	node.Size = size
-	node.Content = content
-	return nil
+	a.prog.setCurrent(st.Path)
+	rc, err := st.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	content, size, err := a.storeContent(ctx, rc)
+	if cerr := rc.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		a.prog.bytesTotal.Add(int64(size) - st.Size)
+		return nil, err
+	}
+	now := time.Now().UTC()
+	node = &repository.Node{Type: repository.NodeFile, Mode: 0o600, ModTime: now, Size: size, Content: content}
+	a.prog.filesDone.Add(1)
+	a.prog.bytesTotal.Add(int64(size) - st.Size)
+	a.count(func(s *repository.Summary) {
+		s.FilesNew++
+		s.TotalFiles++
+		s.TotalBytes += int64(size)
+	})
+	return node, nil
 }
 
 func (a *Archiver) saveDevice(ctx context.Context, path string) (*repository.Node, error) {
@@ -747,6 +833,9 @@ func (a *Archiver) scan(ctx context.Context, root *vnode) {
 				return
 			}
 			switch {
+			case c.stream != nil:
+				a.prog.filesTotal.Add(1)
+				a.prog.bytesTotal.Add(c.stream.Size)
 			case c.device:
 				if f, size, err := fsutil.OpenDevice(c.realPath); err == nil {
 					f.Close()

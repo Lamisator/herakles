@@ -540,15 +540,16 @@ func (a *webAuth) routes(mux *http.ServeMux) {
 }
 
 // adminOnly lists what plain users may not do: change configuration,
-// repositories and users, delete snapshots, or see secrets.
+// repositories and users, delete snapshots, see secrets, or connect to and
+// restore databases.
 func adminOnly(r *http.Request) bool {
 	p, m := r.URL.Path, r.Method
 	switch {
-	case strings.HasPrefix(p, "/api/users"), strings.HasPrefix(p, "/api/config/yaml"), p == "/api/wizard/devices":
+	case strings.HasPrefix(p, "/api/users"), strings.HasPrefix(p, "/api/config/yaml"), p == "/api/wizard/devices", strings.HasPrefix(p, "/api/databases/"):
 		return true
 	case p == "/api/config" && m != http.MethodGet:
 		return true
-	case strings.HasPrefix(p, "/api/repos/") && (strings.HasSuffix(p, "/init") || strings.HasSuffix(p, "/task/prune") || strings.HasSuffix(p, "/password-file")):
+	case strings.HasPrefix(p, "/api/repos/") && (strings.HasSuffix(p, "/init") || strings.HasSuffix(p, "/task/prune") || strings.HasSuffix(p, "/password-file") || strings.HasSuffix(p, "/database-restore")):
 		return true
 	case strings.HasPrefix(p, "/api/repos/") && strings.Contains(p, "/snapshots/") && m == http.MethodDelete:
 		return true

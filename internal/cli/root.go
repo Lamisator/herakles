@@ -115,7 +115,7 @@ edited interactively with 'herakles tui' or 'herakles gui'.`,
 		a.initCmd(), a.backupCmd(), a.jobsCmd(), a.snapshotsCmd(), a.lsCmd(), a.findCmd(), a.diffCmd(),
 		a.restoreCmd(), a.restoreDeviceCmd(), a.dumpCmd(), a.forgetCmd(), a.pruneCmd(), a.checkCmd(),
 		a.statsCmd(), a.keyCmd(), a.unlockCmd(), a.copyCmd(), a.repairCmd(), a.configCmd(),
-		a.dockerCmd(), a.devicesCmd(), a.daemonCmd(), a.webCmd(), a.serverCmd(), a.tuiCmd(), a.guiCmd(), a.trayCmd(), a.versionCmd(),
+		a.dockerCmd(), a.databasesCmd(), a.devicesCmd(), a.daemonCmd(), a.webCmd(), a.serverCmd(), a.tuiCmd(), a.guiCmd(), a.trayCmd(), a.versionCmd(),
 	)
 	return root
 }

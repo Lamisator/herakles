@@ -111,6 +111,37 @@ jobs:
     retention:
       keep_monthly: 6
 
+  # Databases installed on the host, dumped with their own tools while they
+  # run (pg_dump, mysqldump/mariadb-dump, mongodump, sqlite3) and streamed
+  # into the snapshot under /herakles-databases/<name>/. Check the
+  # connections with 'herakles databases ls'; restore one database with
+  # 'herakles databases restore latest postgres/app --job databases'.
+  - name: databases
+    repository: local
+    databases:
+      - type: postgres         # this computer: dumped as the system user postgres
+        # databases: [app]     # default: all
+        # exclude: [test_*]
+      - type: mysql            # MySQL or MariaDB; this computer: root over the socket
+        # host: db.example.com
+        # port: 3306
+        # user: backup
+        # password_env: MYSQL_BACKUP_PASSWORD
+      # - type: mongodb
+      #   uri: mongodb://backup@127.0.0.1:27017/?authSource=admin
+      #   password_file: /etc/herakles/mongo.pw
+      - type: sqlite
+        name: app-db
+        databases: [/var/lib/app/*.db]
+      # Further options: name, run_as (system user for the tools),
+      # bin_dir (e.g. /usr/lib/postgresql/16/bin), options (extra arguments)
+    paths: [/etc]              # files can go in the same snapshot
+    schedule:
+      - cron: "45 1 * * *"
+    retention:
+      keep_daily: 14
+      keep_monthly: 6
+
   # Docker: every Compose project (and standalone container) becomes its own
   # snapshot "containers/<project>" with its directory, bind mounts, named
   # volumes and dumps of Postgres, MySQL/MariaDB and MongoDB containers.

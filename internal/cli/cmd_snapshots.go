@@ -68,7 +68,7 @@ func (a *App) snapshotsCmd() *cobra.Command {
 				if s.Summary != nil {
 					size, added = ui.Bytes(s.Summary.TotalBytes), ui.Bytes(s.Summary.BytesStored)
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID().Short(), ui.Time(s.Time), dash(s.Job), s.Hostname, s.Type, size, added, strings.Join(s.Tags, ","), strings.Join(s.Paths, ", "))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID().Short(), ui.Time(s.Time), dash(s.Job), s.Hostname, s.Type, size, added, strings.Join(s.Tags, ","), snapContents(s))
 			}
 			if err := tw.Flush(); err != nil {
 				return err
@@ -503,4 +503,16 @@ func (a *App) copyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&to, "to", "", "destination repository")
 	f.add(cmd)
 	return cmd
+}
+
+// snapContents lists the paths of a snapshot and its database dumps.
+func snapContents(s *repository.Snapshot) string {
+	out := strings.Join(s.Paths, ", ")
+	if n := len(s.Databases); n > 0 {
+		if out != "" {
+			out += ", "
+		}
+		out += fmt.Sprintf("%d database dumps", n)
+	}
+	return out
 }

@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -168,6 +169,73 @@ type Job struct {
 	// Docker makes the job back up Docker Compose projects (and standalone
 	// containers), each as its own snapshot named "<job>/<project>".
 	Docker *DockerJob `yaml:"docker,omitempty" json:"docker,omitempty"`
+	// Databases are dumped with their own tools (pg_dump, mysqldump, ...)
+	// straight into the job's snapshot, under /herakles-databases/<name>/.
+	Databases []*Database `yaml:"databases,omitempty" json:"databases,omitempty"`
+}
+
+// Database kinds.
+const (
+	DBPostgres = "postgres"
+	DBMySQL    = "mysql" // MySQL and MariaDB
+	DBMongo    = "mongodb"
+	DBSQLite   = "sqlite"
+)
+
+// DatabaseKinds lists the supported database types.
+var DatabaseKinds = []string{DBPostgres, DBMySQL, DBMongo, DBSQLite}
+
+// Database is a database server (or SQLite files) whose dumps a job stores.
+//
+// Without connection settings Herakles connects like the server's own
+// tools do on that machine: as root, Postgres is dumped as the system user
+// "postgres" and MySQL/MariaDB over the socket as root.
+type Database struct {
+	// Name labels the dumps in the snapshot (default: the type).
+	Name string `yaml:"name,omitempty" json:"name,omitempty"`
+	// Type: postgres, mysql (also MariaDB), mongodb or sqlite.
+	Type string `yaml:"type" json:"type"`
+	// Host is a host name, an IP address or a socket directory; Port its port.
+	Host string `yaml:"host,omitempty" json:"host,omitempty"`
+	Port int    `yaml:"port,omitempty" json:"port,omitempty"`
+	User string `yaml:"user,omitempty" json:"user,omitempty"`
+	// Password sources, as for repositories.
+	Password        string `yaml:"password,omitempty" json:"password,omitempty"`
+	PasswordFile    string `yaml:"password_file,omitempty" json:"password_file,omitempty"`
+	PasswordEnv     string `yaml:"password_env,omitempty" json:"password_env,omitempty"`
+	PasswordCommand string `yaml:"password_command,omitempty" json:"password_command,omitempty"`
+	// URI is a MongoDB connection string (instead of host, port and user).
+	URI string `yaml:"uri,omitempty" json:"uri,omitempty"`
+	// Databases to dump (default: all). For SQLite: the database files
+	// (glob patterns allowed).
+	Databases []string `yaml:"databases,omitempty" json:"databases,omitempty"`
+	// Exclude databases by name (glob patterns).
+	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	// RunAs runs the dump tools as this system user (default for a local
+	// Postgres when Herakles runs as root: postgres).
+	RunAs string `yaml:"run_as,omitempty" json:"run_as,omitempty"`
+	// Options are extra arguments for the dump tool.
+	Options []string `yaml:"options,omitempty" json:"options,omitempty"`
+	// BinDir is where the client tools are, if not on PATH
+	// (e.g. /usr/lib/postgresql/16/bin).
+	BinDir string `yaml:"bin_dir,omitempty" json:"bin_dir,omitempty"`
+}
+
+// Label is the name of the database's directory in the snapshot.
+func (d *Database) Label() string {
+	if d.Name != "" {
+		return d.Name
+	}
+	return d.Type
+}
+
+// DBPassword resolves the password sources; "" when none is set.
+func (d *Database) DBPassword() (string, error) {
+	if d.Password == "" && d.PasswordFile == "" && d.PasswordEnv == "" && d.PasswordCommand == "" {
+		return "", nil
+	}
+	c, err := (&Repository{Password: d.Password, PasswordFile: d.PasswordFile, PasswordEnv: d.PasswordEnv, PasswordCommand: d.PasswordCommand}).Credentials()
+	return c.Password, err
 }
 
 // DockerJob selects the containers a job backs up and how.
@@ -662,8 +730,32 @@ func (c *Config) Validate() error {
 		if strings.Contains(j.Name, "/") {
 			add("job %q: names must not contain /", j.Name)
 		}
-		if len(j.Paths) == 0 && len(j.Devices) == 0 && j.Docker == nil {
-			add("job %q: needs at least one path, device or a docker section", j.Name)
+		if len(j.Paths) == 0 && len(j.Devices) == 0 && j.Docker == nil && len(j.Databases) == 0 {
+			add("job %q: needs at least one path, device, database or a docker section", j.Name)
+		}
+		labels := map[string]bool{}
+		for k, d := range j.Databases {
+			if d == nil {
+				add("job %q: databases[%d] is empty", j.Name, k)
+				continue
+			}
+			if !slices.Contains(DatabaseKinds, d.Type) {
+				add("job %q: databases[%d]: type must be one of %s, got %q", j.Name, k, strings.Join(DatabaseKinds, ", "), d.Type)
+			}
+			if l := d.Label(); labels[l] {
+				add("job %q: two databases are named %q; give them different names", j.Name, l)
+			} else if strings.ContainsAny(l, `/\`) || l == "." || l == ".." {
+				add("job %q: database name %q must not contain slashes", j.Name, l)
+			}
+			labels[d.Label()] = true
+			if d.Type == DBSQLite && len(d.Databases) == 0 {
+				add("job %q: sqlite needs the database files in databases", j.Name)
+			}
+			for _, p := range d.Exclude {
+				if _, err := path.Match(p, ""); err != nil {
+					add("job %q: databases: invalid pattern %q", j.Name, p)
+				}
+			}
 		}
 		if j.Docker != nil {
 			for _, f := range j.Docker.Folders {

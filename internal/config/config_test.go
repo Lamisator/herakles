@@ -13,8 +13,11 @@ func TestExampleParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Repositories) != 2 || len(c.Jobs) != 3 {
+	if len(c.Repositories) != 2 || len(c.Jobs) != 4 {
 		t.Fatalf("parsed %d repos %d jobs", len(c.Repositories), len(c.Jobs))
+	}
+	if d := c.Job("databases").Databases; len(d) != 3 || d[0].Label() != "postgres" || d[2].Label() != "app-db" {
+		t.Fatalf("databases: %+v", d)
 	}
 	if d := c.Job("containers").Docker; d == nil || !d.Selects("wiki", "/srv/docker/wiki") || d.Selects("other", "/opt/other") ||
 		d.Selects("portainer", "/srv/docker/portainer") || len(d.Folders) != 1 {
@@ -164,5 +167,21 @@ func TestDockerSelection(t *testing.T) {
 	c.Jobs = []*Job{{Name: "j", Repository: "r", Docker: &DockerJob{Folders: []string{"srv"}}}}
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatal("relative folder accepted:", err)
+	}
+}
+
+func TestValidateDatabases(t *testing.T) {
+	c := New("/tmp/x.yaml")
+	c.Repositories = []*Repository{{Name: "r", Location: "/tmp/r"}}
+	c.Jobs = []*Job{{Name: "db", Repository: "r", Databases: []*Database{{Type: "postgres"}, {Type: "postgres"}, {Type: "oracle"}, {Type: "sqlite", Name: "a/b"}}}}
+	err := c.Validate()
+	for _, want := range []string{`two databases are named "postgres"`, `got "oracle"`, "sqlite needs the database files", `"a/b" must not contain slashes`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+	c.Jobs[0].Databases = []*Database{{Type: "mysql"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal("a job with only databases is valid:", err)
 	}
 }

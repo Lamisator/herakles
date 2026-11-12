@@ -200,7 +200,7 @@ func TestCLIConfigCommands(t *testing.T) {
 		t.Fatal("config init overwrote existing file")
 	}
 	c, err := config.Load(e.cfg)
-	if err != nil || len(c.Jobs) != 3 {
+	if err != nil || len(c.Jobs) != 4 {
 		t.Fatalf("example config: %v (%d jobs)", err, len(c.Jobs))
 	}
 	e.ok("config", "set", "remove", "job", "system-disk")

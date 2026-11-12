@@ -32,6 +32,7 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** and has a token‑protected local control API. |
 | **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index from pack headers. Restores can be verified. Interrupted backups resume (indexes are written periodically). |
 | **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and the GUI **explorer** (preview, search, multi-select) with downloads as ZIP, tar.gz or tar. |
+| **Databases** | A `databases:` section dumps PostgreSQL, MySQL/MariaDB, MongoDB and SQLite running on the host with their own tools (`pg_dump`, `mysqldump`/`mariadb-dump`, `mongodump`, `sqlite3`) while they keep running. The dumps are streamed straight into the snapshot (no temporary files) and deduplicated like everything else. `herakles databases restore` and the GUI load a dump back into the server, also into a new database next to the current one. |
 | **Docker** | A `docker:` section makes a job back up every Compose project (and standalone container) as its own snapshot `JOB/PROJECT`: project directory, bind mounts, named volumes (also of stopped projects) and dumps of Postgres, MySQL/MariaDB and MongoDB. Projects can be stopped during their backup instead. `herakles docker restore` stops the project, restores everything, starts it and loads the dumps into fresh databases, with automatic rollback. |
 | **Web interface** | The daemon can serve the GUI on the network: accounts with Argon2id passwords and passkeys, roles (admin, user), no public sign-up (one-time setup link for the first administrator). |
 | **Extras** | Pre/post/success/failure hooks, notifications (webhook, e‑mail, command), `copy` of snapshots between repositories (3‑2‑1 replication), JSON output for scripting, run history. |
@@ -296,6 +297,59 @@ herakles docker restore wiki --target /tmp/wiki   # just the files, Docker untou
 
 A restore moves the current data aside, restores directory, bind mounts and volumes, recreates missing containers and volumes with `docker compose up --no-start` (so a project can be restored onto a fresh host), starts the project and, in **dumps** mode (default for snapshots taken while running), loads the dumps into freshly initialised database directories. **files** mode (default for snapshots taken with the project stopped) restores the raw database files. If anything fails before the project runs again, the previous data is put back.
 
+## Databases
+
+```yaml
+jobs:
+  - name: databases
+    repository: nas
+    databases:
+      - type: postgres               # this computer: dumped as the system user postgres
+      - type: mysql                  # MySQL or MariaDB; this computer: root over the socket
+        exclude: [test_*]
+      - type: postgres
+        name: reporting              # directory name in the snapshot (default: the type)
+        host: db.example.com
+        user: backup
+        password_env: PG_BACKUP_PASSWORD
+        databases: [sales, crm]      # default: all
+      - type: sqlite
+        name: app
+        databases: [/var/lib/app/*.db]
+      # - type: mongodb
+      #   uri: mongodb://backup@127.0.0.1:27017/?authSource=admin
+      #   password_file: /etc/herakles/mongo.pw
+    paths: [/etc]                    # files can go in the same snapshot (optional)
+    schedule: [{ cron: "45 1 * * *" }]
+```
+
+Each database is dumped with the server's own client tool while it keeps running and stored as a file in the job's snapshot, under `/herakles-databases/<name>/`:
+
+| Type | Tool | In the snapshot |
+|---|---|---|
+| `postgres` | `pg_dump` (plain SQL), `pg_dumpall --globals-only` | `<db>.sql` per database, `_globals.sql` with roles and tablespaces (when the user is a superuser) |
+| `mysql` | `mariadb-dump` or `mysqldump` with `--single-transaction`, routines, events, triggers | `<db>.sql` per database (system schemas left out) |
+| `mongodb` | `mongodump --archive` | `all.archive`, or `<db>.archive` per database listed |
+| `sqlite` | `sqlite3 .dump` | `<file>.sql` per database file |
+
+The dumps are streamed into the repository, so they need no disk space. They are deduplicated and compressed like files, so unchanged tables cost almost nothing. A failed dump (server down, wrong password) is left out of the snapshot and makes the run a warning that names it; the other databases and files are still saved.
+
+Without connection settings Herakles connects like the tools do on the server itself. As root (the system service), Postgres is dumped as the system user `postgres` (peer authentication) and MySQL/MariaDB as `root` over the socket. Otherwise set `host` (or a socket directory), `port`, `user` and one of `password`, `password_file`, `password_env` or `password_command`. Passwords never appear on a command line: Postgres gets `PGPASSWORD`, while MySQL and MongoDB get a private option file. `run_as` runs the tools as another system user, `bin_dir` points to tools that are not on `PATH`, and `options` adds arguments.
+
+```sh
+herakles databases ls                                   # what each job dumps; checks the connections
+herakles databases restore latest --job databases       # list the dumps of the latest snapshot
+herakles databases restore latest postgres/shop         # load it back into "shop"
+herakles databases restore latest postgres/shop --into shop_check   # next to the current one
+herakles databases restore latest postgres/_globals     # roles first, on a new server
+herakles databases restore latest app/app --into /tmp/app.db        # SQLite into a new file
+herakles dump latest /herakles-databases/postgres/shop.sql > shop.sql   # just the file
+```
+
+A restore creates a missing Postgres or MySQL database and replaces the tables in the dump. Postgres restores run in one transaction, so they apply completely or not at all. On a new server, restore `_globals` first: it creates the roles that own the tables. A MongoDB restore replaces the collections in the dump. An existing SQLite file is only replaced with `--replace`, and keeps its owner. In the GUI, the job editor has a **Databases** section with a connection test. The snapshot details list the dumps with **Download** and **Restore…**.
+
+Databases in Docker containers are covered by the `docker:` section (next chapter).
+
 ## Web interface with accounts
 
 ```yaml
@@ -386,6 +440,7 @@ The suite covers:
 * CLI end‑to‑end workflows, the TUI (simulated terminal) and the GUI API.
 * Docker: discovery, data sets, database detection, dumps and loads against a fake docker CLI; per-project backup, restore in dumps and files mode, rollback, fresh-host restore; plus a manual integration run against real Postgres, MariaDB and MongoDB containers.
 * Web mode: setup link, password and passkey logins, throttling, roles, secret redaction, Host/CSRF checks; a Playwright run with a virtual authenticator.
+* Databases: dump plan, streaming into the snapshot, failed dumps left out, restore into a new database (fake tools); plus a manual run against real PostgreSQL 15, MariaDB 10.11, MongoDB 7 and SQLite (backup, in-place and side-by-side restore, roles, socket and password logins, server down).
 * Desktop sharing of the system service: share file, status, one-time login tickets.
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 

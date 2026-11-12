@@ -308,3 +308,8 @@ h2.set-section .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
 .set-head { display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
 .set-head b { font-size: 16px; overflow-wrap: anywhere; }
 .set-head > div { min-width: 0; }
+.db-entry { border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px 10px; margin: 8px 0; }
+.db-entry .toolbar { margin-top: 8px; }
+.dump-list { width: auto; margin: 4px 0 10px; }
+.dump-list td { padding: 4px 12px 4px 0; vertical-align: middle; }
+.dump-list .icon { vertical-align: -3px; }

@@ -53,6 +53,8 @@ type Snapshot struct {
 	Summary  *Summary  `json:"summary,omitempty"`
 	// Docker is set on snapshots of a Docker project.
 	Docker *DockerInfo `json:"docker,omitempty"`
+	// Databases lists the database dumps stored under DatabasesDir.
+	Databases []DatabaseDump `json:"databases,omitempty"`
 
 	id id.ID
 }
@@ -74,6 +76,19 @@ type DockerInfo struct {
 	Stopped    bool              `json:"stopped,omitempty"`
 	Dumps      []DockerDump      `json:"dumps,omitempty"`
 	Containers []DockerContainer `json:"containers,omitempty"`
+}
+
+// DatabasesDir is the top-level snapshot directory of database dumps.
+const DatabasesDir = "herakles-databases"
+
+// DatabaseDump is a dump of one database made by a job's databases section.
+type DatabaseDump struct {
+	Source   string `json:"source"`             // name of the databases entry
+	Kind     string `json:"kind"`               // postgres, mysql, mongodb, sqlite
+	Database string `json:"database,omitempty"` // "" for a whole server (MongoDB, Postgres roles)
+	Path     string `json:"path,omitempty"`     // in the snapshot, e.g. /herakles-databases/postgres/app.sql
+	Size     int64  `json:"size,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // DockerDump is a database dump stored in DockerInfo.MetaDir.

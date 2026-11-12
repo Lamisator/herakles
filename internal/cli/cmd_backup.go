@@ -219,14 +219,16 @@ func (a *App) printResult(res *engine.JobResult) {
 		if res.Snapshot != "" {
 			a.printf("  %-24s %-8s -> %s\n", "(job paths)", "success", res.Snapshot[:8])
 		}
+		a.printDatabases(res)
 		a.printf("  total: %d files, %s; %s new, %s stored; took %s\n", s.TotalFiles, ui.Bytes(s.TotalBytes), ui.Bytes(s.BytesAdded), ui.Bytes(s.BytesStored), ui.Duration(res.End.Sub(res.Start)))
 		return
 	}
 	a.printf("job %s: %s backup -> snapshot %s (%s)\n", res.Job, res.Type, res.Snapshot[:8], res.Status)
 	a.printf("  files: %d new, %d changed, %d unmodified (%d total, %s)\n", s.FilesNew, s.FilesChanged, s.FilesUnmodified, s.TotalFiles, ui.Bytes(s.TotalBytes))
 	a.printf("  added: %s of new data, %s stored after compression; took %s\n", ui.Bytes(s.BytesAdded), ui.Bytes(s.BytesStored), ui.Duration(s.End.Sub(s.Start)))
-	if s.Errors > 0 {
-		a.printf("  %d files could not be read\n", s.Errors)
+	a.printDatabases(res)
+	if n := s.Errors - int64(failedDumps(res.Databases)); n > 0 {
+		a.printf("  %d files could not be read\n", n)
 	}
 	if res.Forgotten > 0 {
 		a.printf("  retention: forgot %d snapshots\n", res.Forgotten)
@@ -234,6 +236,38 @@ func (a *App) printResult(res *engine.JobResult) {
 	if res.Pruned != nil {
 		a.printf("  prune: freed %s\n", ui.Bytes(res.Pruned.BytesFreed))
 	}
+}
+
+func (a *App) printDatabases(res *engine.JobResult) {
+	if len(res.Databases) == 0 {
+		return
+	}
+	var size int64
+	ok := 0
+	for _, d := range res.Databases {
+		if d.Error == "" {
+			ok++
+			size += d.Size
+		}
+	}
+	a.printf("  databases: %d of %d dumped (%s)\n", ok, len(res.Databases), ui.Bytes(size))
+	for _, d := range res.Databases {
+		if d.Error != "" {
+			a.printf("    %s failed: %s\n", dumpKey(d), firstLine(d.Error))
+		}
+	}
+}
+
+// failedDumps counts dumps that failed while being read (each is also
+// counted as a file error).
+func failedDumps(ds []repository.DatabaseDump) int {
+	n := 0
+	for _, d := range ds {
+		if d.Error != "" && d.Path != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func (a *App) adhocBackup(cmd *cobra.Command, job *config.Job, typ string) error {
