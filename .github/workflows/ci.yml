@@ -31,6 +31,7 @@ jobs:
         shell: bash
         # Failing tests become annotations, readable without logging in.
         run: |
+          set +e  # Actions runs bash with -e -o pipefail
           go test ./... 2>&1 | tee test.log; rc=${PIPESTATUS[0]}
           if [ $rc != 0 ]; then
             { grep -E -- '--- FAIL|^FAIL|panic:|_test.go:[0-9]+:' test.log | head -20; echo '--- end of the log:'; tail -n 25 test.log; } > failures.txt
