@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/lamisator/herakles/internal/backend"
 	"github.com/lamisator/herakles/internal/compress"
@@ -12,9 +13,10 @@ import (
 // BlobID computes the content ID of plaintext data.
 func (r *Repository) BlobID(data []byte) id.ID { return r.key.ID(data) }
 
-// HasBlob reports whether a blob is stored or about to be stored.
+// HasBlob reports whether a blob is stored or about to be stored where the
+// running backup may use it: in its own file or its chain.
 func (r *Repository) HasBlob(i id.ID) bool {
-	if r.idx.Has(i) {
+	if r.inScope(i) {
 		return true
 	}
 	r.pmu.Lock()
@@ -30,7 +32,10 @@ func (r *Repository) SaveBlob(ctx context.Context, t BlobType, data []byte) (id.
 
 // SaveBlobWithID is SaveBlob with a precomputed ID.
 func (r *Repository) SaveBlobWithID(ctx context.Context, t BlobType, i id.ID, data []byte) (id.ID, bool, int, error) {
-	if r.idx.Has(i) {
+	if err := r.ensureWriter(ctx); err != nil {
+		return i, false, 0, err
+	}
+	if r.inScope(i) {
 		return i, false, 0, nil
 	}
 	r.pmu.Lock()
@@ -49,6 +54,30 @@ func (r *Repository) SaveBlobWithID(ctx context.Context, t BlobType, i id.ID, da
 		return i, false, 0, err
 	}
 	return i, true, len(ct), nil
+}
+
+// inScope reports whether a stored blob may be referenced by what is being
+// written: anything in the index for older-format data, otherwise only the
+// chain of the running backup.
+func (r *Repository) inScope(i id.ID) bool {
+	r.bmu.Lock()
+	legacy, sc := r.legacy, r.scope
+	r.bmu.Unlock()
+	if legacy {
+		return r.idx.Has(i)
+	}
+	return sc.Has(i)
+}
+
+// ensureWriter opens a backup file (a full backup) when blobs are saved
+// without BeginBackup.
+func (r *Repository) ensureWriter(ctx context.Context) error {
+	r.bmu.Lock()
+	defer r.bmu.Unlock()
+	if r.legacy || r.bw != nil {
+		return nil
+	}
+	return r.openBundleLocked(ctx, bundleName(time.Now(), "data", TypeFull), "", nil, id.Set{})
 }
 
 func (r *Repository) addToPacker(ctx context.Context, t BlobType, i id.ID, ct []byte, rawLen int) error {
@@ -116,7 +145,8 @@ func (r *Repository) LoadBlob(ctx context.Context, i id.ID) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("blob %s not found in index", i.Short())
 	}
-	ct, err := backend.LoadRange(ctx, r.be, backend.Handle{Type: backend.PackFile, Name: loc.Pack.String()}, int64(loc.Offset), int64(loc.Length))
+	h, off := loc.handle()
+	ct, err := backend.LoadRange(ctx, r.be, h, off, int64(loc.Length))
 	if err != nil {
 		return nil, err
 	}

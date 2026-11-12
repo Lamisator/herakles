@@ -2,12 +2,14 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/lamisator/herakles/internal/backend"
+	"github.com/lamisator/herakles/internal/compress"
 	"github.com/lamisator/herakles/internal/id"
 )
 
@@ -56,7 +58,8 @@ type Snapshot struct {
 	// Databases lists the database dumps stored under DatabasesDir.
 	Databases []DatabaseDump `json:"databases,omitempty"`
 
-	id id.ID
+	id     id.ID
+	bundle string // backup file holding the snapshot; "" for snapshots/
 }
 
 // DockerInfo describes the Docker project a snapshot belongs to and where
@@ -112,6 +115,10 @@ type DockerContainer struct {
 // ID returns the snapshot ID (its file name).
 func (s *Snapshot) ID() id.ID { return s.id }
 
+// File returns the name of the backup file holding the snapshot, or "" for
+// a snapshot of the older repository format.
+func (s *Snapshot) File() string { return s.bundle }
+
 // SetID is used by tests and copy operations.
 func (s *Snapshot) SetID(i id.ID) { s.id = i }
 
@@ -125,31 +132,81 @@ func (s *Snapshot) HasTag(t string) bool {
 	return false
 }
 
-// SaveSnapshot stores a snapshot and returns its ID.
+// SaveSnapshot completes the backup file of the running backup with s (a
+// backup without new data gets a file of its own too) and returns the
+// snapshot ID.
 func (r *Repository) SaveSnapshot(ctx context.Context, s *Snapshot) (id.ID, error) {
-	i, err := r.SaveUnpacked(ctx, backend.SnapFile, s)
-	if err == nil {
-		s.id = i
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return id.Null, err
 	}
-	return i, err
+	if err := r.ensureWriter(ctx); err != nil {
+		return id.Null, err
+	}
+	ct := r.key.Seal(compress.Compress(r.opts.Compression, raw))
+	b, err := r.commitBundle(ctx, ct)
+	if err != nil {
+		return id.Null, err
+	}
+	s.id, s.bundle = b.Snapshot.id, b.Name
+	return s.id, nil
 }
 
 // LoadSnapshot loads a snapshot by full ID.
 func (r *Repository) LoadSnapshot(ctx context.Context, i id.ID) (*Snapshot, error) {
+	if s := r.bundleSnapshot(i); s != nil {
+		return s, nil
+	}
 	s := &Snapshot{}
-	if err := r.LoadUnpacked(ctx, backend.SnapFile, i.String(), s); err != nil {
+	err := r.LoadUnpacked(ctx, backend.SnapFile, i.String(), s)
+	if backend.IsNotFound(err) {
+		if _, berr := r.Bundles(ctx); berr == nil {
+			if s := r.bundleSnapshot(i); s != nil {
+				return s, nil
+			}
+		}
+	}
+	if err != nil {
 		return nil, err
 	}
 	s.id = i
 	return s, nil
 }
 
-// RemoveSnapshot deletes a snapshot file.
-func (r *Repository) RemoveSnapshot(ctx context.Context, i id.ID) error {
-	return r.be.Remove(ctx, backend.Handle{Type: backend.SnapFile, Name: i.String()})
+func (r *Repository) bundleSnapshot(i id.ID) *Snapshot {
+	r.bmu.Lock()
+	defer r.bmu.Unlock()
+	for _, b := range r.bundles {
+		if b.Snapshot != nil && b.Snapshot.id == i {
+			c := *b.Snapshot
+			return &c
+		}
+	}
+	return nil
 }
 
-// Snapshots loads all snapshots sorted by time (oldest first).
+// RemoveSnapshot forgets a snapshot. A snapshot in a backup file gets a
+// marker; prune deletes the file once no other backup needs it.
+func (r *Repository) RemoveSnapshot(ctx context.Context, i id.ID) error {
+	if r.bundleSnapshot(i) == nil {
+		err := r.be.Remove(ctx, backend.Handle{Type: backend.SnapFile, Name: i.String()})
+		if !backend.IsNotFound(err) {
+			return err
+		}
+		if _, berr := r.Bundles(ctx); berr != nil || r.bundleSnapshot(i) == nil {
+			return err
+		}
+	}
+	err := r.be.Save(ctx, backend.Handle{Type: backend.ForgetFile, Name: i.String()}, []byte("forgotten\n"))
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
+}
+
+// Snapshots loads all snapshots sorted by time (oldest first): those of the
+// older format in snapshots/ and those in backup files that were not
+// forgotten.
 func (r *Repository) Snapshots(ctx context.Context) ([]*Snapshot, error) {
 	names, err := r.ListNames(ctx, backend.SnapFile)
 	if err != nil {
@@ -170,8 +227,13 @@ func (r *Repository) Snapshots(ctx context.Context) ([]*Snapshot, error) {
 				ch <- res{nil, nil}
 				return
 			}
-			s, err := r.LoadSnapshot(ctx, i)
-			ch <- res{s, err}
+			s := &Snapshot{}
+			if err := r.LoadUnpacked(ctx, backend.SnapFile, n, s); err != nil {
+				ch <- res{nil, err}
+				return
+			}
+			s.id = i
+			ch <- res{s, nil}
 		}(n)
 	}
 	var out []*Snapshot
@@ -182,6 +244,20 @@ func (r *Repository) Snapshots(ctx context.Context) ([]*Snapshot, error) {
 		}
 		if x.s != nil {
 			out = append(out, x.s)
+		}
+	}
+	bundles, err := r.Bundles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	forgotten, err := r.forgottenSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range bundles {
+		if b.Snapshot != nil && !forgotten.Has(b.Snapshot.id) {
+			c := *b.Snapshot
+			out = append(out, &c)
 		}
 	}
 	SortSnapshots(out)

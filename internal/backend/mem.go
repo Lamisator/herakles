@@ -24,6 +24,15 @@ func (m *Mem) Location() string { return "memory" }
 // Create implements Backend.
 func (m *Mem) Create(ctx context.Context) error { return nil }
 
+// SaveStream implements Backend.
+func (m *Mem) SaveStream(ctx context.Context, h Handle, rd io.Reader) error {
+	data, err := io.ReadAll(ctxReader{ctx, rd})
+	if err != nil {
+		return err
+	}
+	return m.Save(ctx, h, data)
+}
+
 // Save implements Backend.
 func (m *Mem) Save(ctx context.Context, h Handle, data []byte) error {
 	if err := h.Valid(); err != nil {

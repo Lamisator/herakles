@@ -22,10 +22,15 @@ const (
 	IndexFile  FileType = "index"
 	SnapFile   FileType = "snapshots"
 	LockFile   FileType = "locks"
+	// BundleFile holds one backup each: its new data, the list of that
+	// data and its snapshot.
+	BundleFile FileType = "backups"
+	// ForgetFile marks a snapshot inside a backup file as forgotten.
+	ForgetFile FileType = "forgotten"
 )
 
 // AllTypes lists all directory-based file types.
-var AllTypes = []FileType{KeyFile, PackFile, IndexFile, SnapFile, LockFile}
+var AllTypes = []FileType{KeyFile, PackFile, IndexFile, SnapFile, LockFile, BundleFile, ForgetFile}
 
 // ValidType reports whether t is a known file type.
 func ValidType(t FileType) bool {
@@ -88,12 +93,24 @@ type Backend interface {
 	// Save stores data under h atomically. Existing files are not overwritten
 	// except for lock files.
 	Save(ctx context.Context, h Handle, data []byte) error
+	// SaveStream stores everything read from rd under h, atomically: the
+	// file appears only once rd reported io.EOF. Any other error from rd
+	// discards what was written.
+	SaveStream(ctx context.Context, h Handle, rd io.Reader) error
 	// Load returns a reader for length bytes at offset (length 0 = to end).
 	Load(ctx context.Context, h Handle, offset, length int64) (io.ReadCloser, error)
 	Stat(ctx context.Context, h Handle) (FileInfo, error)
 	Remove(ctx context.Context, h Handle) error
 	List(ctx context.Context, t FileType, fn func(FileInfo) error) error
 	Close() error
+}
+
+// PartialRemover is implemented by backends that keep partially written
+// files (of interrupted uploads) next to the complete ones.
+type PartialRemover interface {
+	// RemovePartials deletes the unfinished files of type t and returns
+	// how many there were. Only call it while nothing writes.
+	RemovePartials(ctx context.Context, t FileType) (int, error)
 }
 
 // LoadAll reads a whole file.

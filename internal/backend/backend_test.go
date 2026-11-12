@@ -5,12 +5,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -72,6 +74,30 @@ func conformance(t *testing.T, b Backend) {
 	rd.Close()
 	if int64(len(tail)) != fi.Size-990 {
 		t.Fatalf("tail length %d", len(tail))
+	}
+	// Streams: stored when complete, discarded when the reader fails.
+	big := bytes.Repeat([]byte("0123456789abcdef"), 300_000) // 4.8 MB
+	bh := Handle{Type: BundleFile, Name: "20261112-120000_job_full_0011.hbk"}
+	if err := b.SaveStream(ctx, bh, bytes.NewReader(big)); err != nil {
+		t.Fatal("stream:", err)
+	}
+	if got, err := LoadAll(ctx, b, bh); err != nil || !bytes.Equal(got, big) {
+		t.Fatalf("stream content: %d bytes, %v", len(got), err)
+	}
+	broken := io.MultiReader(bytes.NewReader(big[:1<<20]), iotest.ErrReader(errors.New("cut off")))
+	fh := Handle{Type: BundleFile, Name: "20261112-130000_job_full_0022.hbk"}
+	if err := b.SaveStream(ctx, fh, broken); err == nil {
+		t.Fatal("a failed stream was stored")
+	}
+	var bundles []string
+	b.List(ctx, BundleFile, func(fi FileInfo) error { bundles = append(bundles, fi.Name); return nil })
+	if len(bundles) != 1 || bundles[0] != bh.Name {
+		t.Fatalf("after a failed stream: %v", bundles)
+	}
+	if pr, ok := b.(PartialRemover); ok {
+		if _, err := pr.RemovePartials(ctx, BundleFile); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Lock files may be overwritten.
 	lh := Handle{Type: LockFile, Name: "lock1"}

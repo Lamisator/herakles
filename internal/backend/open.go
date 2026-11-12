@@ -60,12 +60,12 @@ func Open(location string, opts Options) (Backend, error) {
 		if runtime.GOOS == "windows" {
 			p = strings.TrimPrefix(p, "/")
 		}
-		b = NewLocal(p)
+		b, err = openLocal(p)
 	default:
 		if i := strings.Index(location, "://"); i > 0 && !isWindowsDrive(location) {
 			return nil, fmt.Errorf("unsupported repository URL scheme %q", location[:i])
 		}
-		b = NewLocal(location)
+		b, err = openLocal(location)
 	}
 	if err != nil {
 		return nil, err
@@ -74,6 +74,14 @@ func Open(location string, opts Options) (Backend, error) {
 		b = NewLimited(b, opts.UploadLimit, opts.DownloadLimit)
 	}
 	return b, nil
+}
+
+// openLocal opens a repository folder, or backup files copied out of one.
+func openLocal(p string) (Backend, error) {
+	if IsLoose(p) {
+		return NewLoose(p)
+	}
+	return NewLocal(p), nil
 }
 
 func isWindowsDrive(s string) bool {

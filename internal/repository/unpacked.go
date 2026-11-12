@@ -43,15 +43,10 @@ func (r *Repository) LoadUnpacked(ctx context.Context, t backend.FileType, name 
 	if t != backend.LockFile && id.Hash(ct).String() != name {
 		return fmt.Errorf("%s/%s: content does not match its name (corrupted)", t, name)
 	}
-	pt, err := r.key.Open(ct)
-	if err != nil {
+	if err := r.decodeUnpacked(ct, obj); err != nil {
 		return fmt.Errorf("%s/%s: %w", t, name, err)
 	}
-	raw, err := compress.Decompress(pt)
-	if err != nil {
-		return fmt.Errorf("%s/%s: %w", t, name, err)
-	}
-	return json.Unmarshal(raw, obj)
+	return nil
 }
 
 // ListNames returns all file names of a type.

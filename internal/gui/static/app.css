@@ -354,3 +354,9 @@ pre.code-box { background: var(--border); padding: 6px 8px; border-radius: 6px; 
 .usage .meta { margin-top: 5px; }
 .usage-refresh { cursor: pointer; margin-left: 4px; vertical-align: -2px; }
 .usage-refresh .ico { width: 13px; height: 13px; }
+
+.compat { margin: 6px 0; font-size: 13px; }
+.compat ul { margin: 0 0 4px; padding-left: 18px; }
+.compat li { margin: 2px 0; }
+.warn-text { color: var(--warn); }
+.bad-text { color: var(--err); }

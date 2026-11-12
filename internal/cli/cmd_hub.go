@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"text/tabwriter"
 	"time"
@@ -290,7 +291,8 @@ func (a *App) hubServersCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(a.out, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tID\tSTATE\tHOST\tSYSTEM\tVERSION\tLAST SEEN")
+			fmt.Fprintln(tw, "NAME\tID\tSTATE\tHOST\tSYSTEM\tVERSION\tCOMPATIBILITY\tLAST SEEN")
+			var issues []string
 			for _, s := range servers {
 				state := "offline"
 				if online[s.ID] {
@@ -300,9 +302,30 @@ func (a *App) hubServersCmd() *cobra.Command {
 				if !s.LastSeen.IsZero() {
 					seen = ui.Time(s.LastSeen)
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\n", s.Name, s.ID, state, dash(s.Hello.Hostname), s.Hello.OS, s.Hello.Arch, dash(s.Hello.Version), seen)
+				cp := hub.Compare(Version, hub.LocalCapabilities(), s.Hello)
+				status := cp.Status
+				if status == "error" {
+					status = "INCOMPATIBLE"
+				}
+				for _, i := range cp.Issues {
+					who := s.Name
+					if i.Side == "hub" {
+						who = "this hub"
+					}
+					issues = append(issues, fmt.Sprintf("%s (%s): %s", s.Name, i.Severity, strings.Replace(i.Message, "it ", who+" ", 1)))
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\n", s.Name, s.ID, state, dash(s.Hello.Hostname), s.Hello.OS, s.Hello.Arch, dash(s.Hello.Version), status, seen)
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			for _, i := range issues {
+				a.printf("\n%s", i)
+			}
+			if len(issues) > 0 {
+				a.printf("\n\nUpdate the older side; servers from 0.11 on can update themselves ('herakles update').\n")
+			}
+			return nil
 		},
 	}
 }

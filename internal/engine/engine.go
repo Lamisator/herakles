@@ -460,7 +460,7 @@ func (e *Engine) backupUnit(ctx context.Context, repo *repository.Repository, jo
 	if err != nil {
 		return &unitResult{databases: dbs}, err
 	}
-	r := &unitResult{snap: snap, typ: typ, databases: dbs}
+	r := &unitResult{snap: snap, typ: snap.Type, databases: dbs}
 	if !job.Retention.Empty() {
 		n, err := e.ApplyRetention(ctx, repo, job.Retention, repository.SnapshotFilter{Job: u.Name, Hostname: host}, ro.DryRunRetention)
 		if err != nil {

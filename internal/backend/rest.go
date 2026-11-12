@@ -19,6 +19,8 @@ import (
 type REST struct {
 	base   *url.URL // .../reponame/
 	client *http.Client
+	// stream uploads large files: no overall time limit, the context ends it.
+	stream *http.Client
 	user   string
 	pass   string
 }
@@ -63,6 +65,7 @@ func NewREST(rawURL string, opts Options) (*REST, error) {
 	tr.TLSClientConfig = tlsCfg
 	tr.MaxIdleConnsPerHost = 16
 	r.client = &http.Client{Transport: tr, Timeout: 10 * time.Minute}
+	r.stream = &http.Client{Transport: tr}
 	return r, nil
 }
 
@@ -142,6 +145,32 @@ func (r *REST) Save(ctx context.Context, h Handle, data []byte) error {
 		return err
 	}
 	resp, err := r.do(ctx, http.MethodPost, r.url(h), data, nil)
+	if err != nil {
+		return err
+	}
+	if err := checkResp(resp, h, http.StatusOK, http.StatusCreated); err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// SaveStream implements Backend. The body is sent chunked; the server keeps
+// the file only when it arrived completely.
+func (r *REST) SaveStream(ctx context.Context, h Handle, rd io.Reader) error {
+	if err := h.Valid(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.url(h), io.NopCloser(rd))
+	if err != nil {
+		return err
+	}
+	if r.user != "" {
+		req.SetBasicAuth(r.user, r.pass)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = -1
+	resp, err := r.stream.Do(req)
 	if err != nil {
 		return err
 	}
@@ -233,6 +262,11 @@ func (r *REST) List(ctx context.Context, t FileType, fn func(FileInfo) error) er
 	resp, err := r.do(ctx, http.MethodGet, u.String(), nil, nil)
 	if err != nil {
 		return err
+	}
+	if (t == BundleFile || t == ForgetFile) && resp.StatusCode == http.StatusNotFound {
+		// A server older than these file types has none of them.
+		resp.Body.Close()
+		return nil
 	}
 	if err := checkResp(resp, strName(string(t)), http.StatusOK); err != nil {
 		return err

@@ -107,10 +107,19 @@ func TestIncrementalAndDedup(t *testing.T) {
 	if s3.Summary.BytesAdded > 1000 {
 		t.Fatalf("incremental stored %d bytes for a tiny change", s3.Summary.BytesAdded)
 	}
-	// A full backup re-reads everything but dedup still stores nothing new.
+	// Each backup is one file; incrementals need the files of their chain.
+	chain, err := repo.Chain(ctx, s3)
+	if err != nil || len(chain) != 3 || chain[0].Name != s3.File() || chain[1].Name != s2.File() || chain[2].Name != s1.File() {
+		t.Fatalf("chain of s3: %v %+v", err, chain)
+	}
+	// A full backup re-reads everything and is self-contained: it stores
+	// all data again in its own file.
 	s4 := backup(t, repo, archiver.Options{Paths: []string{src}, Type: repository.TypeFull, Parent: s3})
-	if s4.Summary.FilesUnmodified != 0 || s4.Summary.BlobsAdded != 0 || s4.Parent != nil {
+	if s4.Summary.FilesUnmodified != 0 || s4.Summary.BlobsAdded < s1.Summary.BlobsAdded || s4.Parent != nil {
 		t.Fatalf("full backup: %+v parent=%v", s4.Summary, s4.Parent)
+	}
+	if chain, err := repo.Chain(ctx, s4); err != nil || len(chain) != 1 {
+		t.Fatalf("chain of a full backup: %v %d", err, len(chain))
 	}
 	// Each snapshot restores its own state.
 	dst := t.TempDir()
@@ -317,23 +326,36 @@ func TestUnreadableFileIsReportedNotFatal(t *testing.T) {
 	}
 }
 
-// failingBackend makes pack uploads fail after a few writes.
+// failingBackend makes the upload of backup files fail after some data.
 type failingBackend struct {
 	backend.Backend
-	left atomic.Int32
+	left atomic.Int64
 }
 
-func (f *failingBackend) Save(ctx context.Context, h backend.Handle, data []byte) error {
-	if h.Type == backend.PackFile && f.left.Add(-1) < 0 {
-		return errors.New("disk full")
+type failingReader struct {
+	r io.Reader
+	f *failingBackend
+}
+
+func (fr failingReader) Read(p []byte) (int, error) {
+	n, err := fr.r.Read(p)
+	if fr.f.left.Add(-int64(n)) < 0 {
+		return n, errors.New("disk full")
 	}
-	return f.Backend.Save(ctx, h, data)
+	return n, err
+}
+
+func (f *failingBackend) SaveStream(ctx context.Context, h backend.Handle, rd io.Reader) error {
+	if h.Type == backend.BundleFile {
+		rd = failingReader{rd, f}
+	}
+	return f.Backend.SaveStream(ctx, h, rd)
 }
 
 func TestRepositoryErrorsAbortBackup(t *testing.T) {
 	_, mem := tu.NewRepo(t)
 	fb := &failingBackend{Backend: mem}
-	fb.left.Store(1)
+	fb.left.Store(64 << 10)
 	repo := tu.Reopen(t, fb)
 	src := t.TempDir()
 	for i := 0; i < 20; i++ {

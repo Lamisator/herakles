@@ -41,8 +41,12 @@ func (a *App) pruneCmd() *cobra.Command {
 			if dryRun {
 				verb = "would free"
 			}
-			a.printf("%s %s: %d packs deleted, %d repacked (%s rewritten), %d unreferenced packs, %d unused blobs\n",
-				verb, ui.Bytes(st.BytesFreed), st.PacksDeleted, st.PacksRepacked, ui.Bytes(st.BytesRepacked), st.UnreferencedPacks, st.BlobsRemoved)
+			a.printf("%s %s: %d of %d backup files deleted, %d merged (%s rewritten)\n",
+				verb, ui.Bytes(st.BytesFreed), st.FilesDeleted, st.FilesTotal, st.FilesMerged, ui.Bytes(st.BytesRepacked))
+			if st.PacksTotal > 0 || st.UnreferencedPacks > 0 {
+				a.printf("older format: %d packs deleted, %d repacked, %d unreferenced packs, %d unused blobs\n",
+					st.PacksDeleted, st.PacksRepacked, st.UnreferencedPacks, st.BlobsRemoved)
+			}
 			return nil
 		},
 	}
@@ -88,9 +92,12 @@ verified.`,
 				for _, e := range res.Errors {
 					fmt.Fprintf(a.err, "ERROR: %s\n", e)
 				}
-				a.printf("checked %d snapshots, %d trees, %d packs", res.Snapshots, res.Trees, res.Packs)
+				a.printf("checked %d snapshots, %d trees, %d backup files", res.Snapshots, res.Trees, res.Files)
+				if res.Packs > 0 {
+					a.printf(", %d packs of the older format", res.Packs)
+				}
 				if res.PacksRead > 0 {
-					a.printf(", read %d packs (%s, %d blobs)", res.PacksRead, ui.Bytes(res.BytesRead), res.BlobsRead)
+					a.printf(", read %d backup files and %d packs (%s, %d blobs)", res.FilesRead, res.PacksRead, ui.Bytes(res.BytesRead), res.BlobsRead)
 				}
 				a.printf("\n")
 			}
@@ -169,7 +176,10 @@ func (a *App) statsCmd() *cobra.Command {
 			}
 			a.printf("repository %s at %s\n", repo.Config().ID[:8], repo.Backend().Location())
 			a.printf("  snapshots:        %d\n", st.Snapshots)
-			a.printf("  packs:            %d\n", st.Packs)
+			a.printf("  backup files:     %d\n", st.Files)
+			if st.OldPacks > 0 {
+				a.printf("  older format:     %d pack files\n", st.OldPacks)
+			}
 			a.printf("  blobs:            %d (%d data, %d tree)\n", st.Blobs, st.DataBlobs, st.TreeBlobs)
 			a.printf("  unique data:      %s\n", ui.Bytes(st.RawBytes))
 			a.printf("  stored on disk:   %s (compression %s)\n", ui.Bytes(st.StoredBytes), ui.Ratio(st.RawBytes, st.StoredBytes))

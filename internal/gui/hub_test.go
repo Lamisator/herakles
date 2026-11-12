@@ -84,6 +84,18 @@ func TestWebHub(t *testing.T) {
 	if len(servers) != 1 || servers[0].(map[string]any)["online"] != true {
 		t.Fatal("server not online:", servers)
 	}
+	// The server announces its capabilities; same version, so compatible.
+	for time.Now().Before(deadline) {
+		_, m, _ := c.do("GET", "/api/hub", nil)
+		servers, _ = m["servers"].([]any)
+		if cp, _ := servers[0].(map[string]any)["compat"].(map[string]any); cp["status"] == "ok" && cp["derived"] == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if cp, _ := servers[0].(map[string]any)["compat"].(map[string]any); cp["status"] != "ok" || len(cp["capabilities"].([]any)) == 0 {
+		t.Fatal("compatibility:", cp)
+	}
 	base := "/api/hub/servers/" + creds.ID
 	if code, _, raw := c.do("GET", base+"/api/jobs", nil); code != 200 || !strings.Contains(raw, `"etc"`) {
 		t.Fatal("jobs of the server:", code, raw)

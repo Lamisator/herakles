@@ -49,6 +49,14 @@ func (l *Limited) Save(ctx context.Context, h Handle, data []byte) error {
 	return l.Backend.Save(ctx, h, data)
 }
 
+// SaveStream implements Backend.
+func (l *Limited) SaveStream(ctx context.Context, h Handle, rd io.Reader) error {
+	if l.up != nil {
+		rd = limitedReader{io.NopCloser(rd), ctx, l.up}
+	}
+	return l.Backend.SaveStream(ctx, h, rd)
+}
+
 type limitedReader struct {
 	io.ReadCloser
 	ctx context.Context

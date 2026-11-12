@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/lamisator/herakles/internal/backend"
@@ -39,12 +40,27 @@ type PackInfo struct {
 	ID    id.ID       `json:"id"`
 	Size  int64       `json:"size"`
 	Blobs []PackEntry `json:"blobs"`
+	// Offset is where the pack starts inside its backup file.
+	Offset int64 `json:"offset,omitempty"`
+	// File is the backup file holding the pack; empty for a pack file in
+	// data/ (older repository format).
+	File string `json:"-"`
 }
 
 // Location identifies where a blob is stored.
 type Location struct {
 	Pack id.ID
+	File string // backup file, or "" for data/<Pack>
+	Base int64  // offset of the pack in File
 	PackEntry
+}
+
+// handle returns the file holding the blob and the blob's offset in it.
+func (l Location) handle() (backend.Handle, int64) {
+	if l.File != "" {
+		return backend.Handle{Type: backend.BundleFile, Name: l.File}, l.Base + int64(l.Offset)
+	}
+	return backend.Handle{Type: backend.PackFile, Name: l.Pack.String()}, int64(l.Offset)
 }
 
 // indexFile is the serialized form of an index file.
@@ -80,7 +96,7 @@ func (x *Index) addPackLocked(p PackInfo) {
 	x.packs[p.ID] = &pc
 	for _, b := range p.Blobs {
 		if _, ok := x.blobs[b.ID]; !ok {
-			x.blobs[b.ID] = Location{Pack: p.ID, PackEntry: b}
+			x.blobs[b.ID] = Location{Pack: p.ID, File: p.File, Base: p.Offset, PackEntry: b}
 		}
 	}
 }
@@ -141,7 +157,8 @@ func (x *Index) Files() id.Set {
 	return s
 }
 
-// LoadIndex (re)loads all index files from the backend.
+// LoadIndex (re)loads all index files and the tables of contents of the
+// backup files.
 func (r *Repository) LoadIndex(ctx context.Context) error {
 	idx := NewIndex()
 	var names []string
@@ -183,6 +200,22 @@ func (r *Repository) LoadIndex(ctx context.Context) error {
 		}
 		idx.mu.Unlock()
 	}
+	bundles, err := r.Bundles(ctx)
+	if err != nil {
+		return err
+	}
+	names = names[:0]
+	for n := range bundles {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	idx.mu.Lock()
+	for _, n := range names {
+		for _, p := range bundles[n].Packs {
+			idx.addPackLocked(p)
+		}
+	}
+	idx.mu.Unlock()
 	r.idx = idx
 	return nil
 }

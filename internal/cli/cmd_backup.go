@@ -104,12 +104,16 @@ func (a *App) backupCmd() *cobra.Command {
 Backup types:
   auto          incremental, or full when the last full backup is older than
                 the job's full_interval (default)
-  full          re-read and re-hash every file (no reliance on the previous
-                snapshot); data is still deduplicated
+  full          re-read every file and store all data in a new backup file
+                that can be restored on its own
   incremental   only read files changed since the latest snapshot of the job
   differential  only read files changed since the latest FULL snapshot
 
-Every snapshot is complete and independently restorable.`,
+Every backup is written as one file in the repository's backups/ folder.
+Incremental and differential backups store only what their chain (the
+files from the last full backup on) lacks; copy a chain's files anywhere and
+'herakles restore --repo FOLDER' reads them with the password alone.
+Every snapshot is complete: restoring one gives all its files.`,
 		Example: `  herakles backup home
   herakles backup --all --type full
   herakles backup --repo local --path /etc --path /root --tag config
@@ -328,7 +332,7 @@ func (a *App) adhocBackup(cmd *cobra.Command, job *config.Job, typ string) error
 	if err != nil {
 		return err
 	}
-	res := &engine.JobResult{Job: "(ad-hoc)", Type: rtyp, Snapshot: snap.ID().String(), Summary: snap.Summary, Status: "success"}
+	res := &engine.JobResult{Job: "(ad-hoc)", Type: snap.Type, Snapshot: snap.ID().String(), Summary: snap.Summary, Status: "success"}
 	if snap.Summary.Errors > 0 {
 		res.Status = "warning"
 	}

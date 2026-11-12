@@ -262,6 +262,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	var hb *hub.Hub
 	if a.cfg.Web.Listen != "" {
 		hb = hub.New(ctx, hub.OpenStore(hub.StorePath(a.cfg.GetStateDir())), a.eng.Log, a.eng.Config)
+		hb.Version = Version
 	}
 	d.Extra = func(st *daemon.Status) {
 		if hb != nil {

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -97,6 +98,10 @@ func (b *fsBackend) ensureDir(d string) error {
 }
 
 func (b *fsBackend) Save(ctx context.Context, h Handle, data []byte) error {
+	return b.SaveStream(ctx, h, bytes.NewReader(data))
+}
+
+func (b *fsBackend) SaveStream(ctx context.Context, h Handle, rd io.Reader) error {
 	if err := h.Valid(); err != nil {
 		return err
 	}
@@ -115,7 +120,8 @@ func (b *fsBackend) Save(ctx context.Context, h Handle, data []byte) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
+	// Large writes: SFTP and SMB split them into requests of their own.
+	if _, err := io.CopyBuffer(f, ctxReader{ctx, rd}, make([]byte, 1<<20)); err != nil {
 		f.Close()
 		_ = b.fs.Remove(tmp)
 		return err
@@ -132,6 +138,29 @@ func (b *fsBackend) Save(ctx context.Context, h Handle, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// RemovePartials implements PartialRemover.
+func (b *fsBackend) RemovePartials(ctx context.Context, t FileType) (int, error) {
+	defer b.acquire()()
+	d := path.Join(b.root, string(t))
+	entries, err := b.fs.ReadDir(d)
+	if err != nil {
+		if isNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), ".tmp-") {
+			if err := b.fs.Remove(path.Join(d, e.Name())); err != nil && !isNotExist(err) {
+				return n, err
+			}
+			n++
+		}
+	}
+	return n, nil
 }
 
 type releaseOnClose struct {

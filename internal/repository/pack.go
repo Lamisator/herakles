@@ -52,6 +52,13 @@ func (r *Repository) uploadPack(ctx context.Context, p *packer) error {
 		return err
 	}
 	packID := id.Hash(data)
+	r.bmu.Lock()
+	legacy := r.legacy
+	r.bmu.Unlock()
+	if !legacy {
+		// The blobs stay pending until the backup file is complete.
+		return r.writePack(data, PackInfo{ID: packID, Size: int64(len(data)), Blobs: entries})
+	}
 	if err := r.be.Save(ctx, backend.Handle{Type: backend.PackFile, Name: packID.String()}, data); err != nil {
 		return fmt.Errorf("upload pack: %w", err)
 	}

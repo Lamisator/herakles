@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -146,9 +147,23 @@ func TestServerQuota(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "quota") {
 		t.Fatalf("quota not enforced: %v", err)
 	}
+	// Backup files are streamed; the quota stops them too, and nothing
+	// of the rejected file stays.
+	err = be.SaveStream(ctx, backend.Handle{Type: backend.BundleFile, Name: "x_full_1.hbk"}, bytes.NewReader(make([]byte, 100<<10)))
+	if err == nil || !strings.Contains(err.Error(), "quota") {
+		t.Fatalf("quota not enforced for streams: %v", err)
+	}
+	if err := be.SaveStream(ctx, backend.Handle{Type: backend.BundleFile, Name: "x_full_2.hbk"}, bytes.NewReader(make([]byte, 10<<10))); err != nil {
+		t.Fatal("stream within quota:", err)
+	}
+	var names []string
+	be.List(ctx, backend.BundleFile, func(fi backend.FileInfo) error { names = append(names, fi.Name); return nil })
+	if len(names) != 1 || names[0] != "x_full_2.hbk" {
+		t.Fatalf("backup files: %v", names)
+	}
 	// The client sees the quota as the repository's capacity.
 	sp, err := backend.SpaceOf(ctx, be)
-	if err != nil || !sp.Quota || sp.Total != 64<<10 || sp.Free == 0 || sp.Free >= 64<<10-30<<10 {
+	if err != nil || !sp.Quota || sp.Total != 64<<10 || sp.Free == 0 || sp.Free >= 64<<10-40<<10 {
 		t.Fatalf("space with quota: %+v %v", sp, err)
 	}
 	plain := client(t, newServer(t, config.Server{NoAuth: true}), "p", "", "")

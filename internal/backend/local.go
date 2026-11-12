@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -49,6 +50,11 @@ func (l *Local) Create(ctx context.Context) error {
 
 // Save implements Backend.
 func (l *Local) Save(ctx context.Context, h Handle, data []byte) error {
+	return l.SaveStream(ctx, h, bytes.NewReader(data))
+}
+
+// SaveStream implements Backend.
+func (l *Local) SaveStream(ctx context.Context, h Handle, rd io.Reader) error {
 	if err := h.Valid(); err != nil {
 		return err
 	}
@@ -62,7 +68,7 @@ func (l *Local) Save(ctx context.Context, h Handle, data []byte) error {
 	}
 	tmpName := tmp.Name()
 	cleanup := func() { tmp.Close(); os.Remove(tmpName) }
-	if _, err := tmp.Write(data); err != nil {
+	if _, err := io.Copy(tmp, ctxReader{ctx, rd}); err != nil {
 		cleanup()
 		return err
 	}
@@ -88,6 +94,27 @@ func (l *Local) Save(ctx context.Context, h Handle, data []byte) error {
 		_ = os.Chmod(final, 0o400)
 	}
 	return nil
+}
+
+// RemovePartials implements PartialRemover.
+func (l *Local) RemovePartials(ctx context.Context, t FileType) (int, error) {
+	entries, err := os.ReadDir(filepath.Join(l.root, string(t)))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), ".tmp-") {
+			if err := os.Remove(filepath.Join(l.root, string(t), e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return n, err
+			}
+			n++
+		}
+	}
+	return n, nil
 }
 
 type sectionReadCloser struct {

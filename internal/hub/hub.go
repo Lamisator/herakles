@@ -29,6 +29,8 @@ type Hub struct {
 	Store  *Store
 	Log    *slog.Logger
 	Config func() *config.Config
+	// Version of the hub's Herakles, compared with the servers'.
+	Version string
 
 	mu     sync.Mutex
 	conns  map[string]*conn
@@ -257,6 +259,12 @@ func (h *Hub) greet(c *conn, name string) {
 	c.hello = hello
 	h.mu.Unlock()
 	_ = h.Store.Seen(c.id, c.addr, hello)
+	if cp := Compare(h.Version, LocalCapabilities(), hello); cp.Status != "ok" {
+		for _, i := range cp.Issues {
+			h.Log.Warn("hub: server and hub are not fully compatible", "server", name, "version", hello.Version,
+				"hub_version", h.Version, "lacking", i.Side, "capability", i.Capability, "consequence", i.Message)
+		}
+	}
 	h.push(ctx, c, name)
 }
 
@@ -419,6 +427,8 @@ type View struct {
 	Hello     Hello       `json:"hello"`
 	Sync      *SyncResult `json:"sync,omitempty"`
 	SyncError string      `json:"sync_error,omitempty"`
+	// Compat says what the server and this hub cannot do together.
+	Compat Compatibility `json:"compat"`
 }
 
 // Servers lists the attached servers with their connection state.
@@ -438,6 +448,7 @@ func (h *Hub) Servers() ([]View, error) {
 				v.Hello = c.hello
 			}
 		}
+		v.Compat = Compare(h.Version, LocalCapabilities(), v.Hello)
 		out = append(out, v)
 	}
 	return out, nil

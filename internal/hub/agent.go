@@ -93,7 +93,7 @@ func SaveCredentials(stateDir string, c *Credentials) error {
 // LocalHello describes this machine.
 func LocalHello(version string) Hello {
 	host, _ := os.Hostname()
-	return Hello{Hostname: host, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Container: blockdev.Container()}
+	return Hello{Hostname: host, Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH, Container: blockdev.Container(), Capabilities: LocalCapabilities()}
 }
 
 // HTTPClient connects to the hub. A certificate is accepted when it is

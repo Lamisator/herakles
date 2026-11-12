@@ -44,6 +44,9 @@ type Hello struct {
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
 	Container string `json:"container,omitempty"`
+	// Capabilities lists what the server can do (see Capabilities); empty
+	// for versions before 0.13.0.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // Token is an unused invitation to attach a server.

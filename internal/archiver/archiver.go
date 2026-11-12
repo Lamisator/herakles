@@ -334,6 +334,22 @@ func (a *Archiver) Run(ctx context.Context) (*repository.Snapshot, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// The backup is written as one file; it may only build on its parent's
+	// chain of files. A parent of the older repository format means a full
+	// backup.
+	var parent *repository.Snapshot
+	if a.opts.Type != repository.TypeFull {
+		parent = a.opts.Parent
+	}
+	parent, err = a.repo.BeginBackup(ctx, repository.BackupStart{Job: a.opts.Job, Hostname: a.opts.Hostname, Type: a.opts.Type, Parent: parent})
+	if err != nil {
+		return nil, err
+	}
+	defer a.repo.AbortBackup() // after SaveSnapshot there is nothing to abort
+	if parent == nil {
+		a.opts.Type, a.opts.Parent = repository.TypeFull, nil
+	}
+
 	go a.scan(ctx, vroot)
 
 	a.fileSem = make(chan struct{}, a.opts.FileWorkers)

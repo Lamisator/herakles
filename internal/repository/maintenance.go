@@ -62,6 +62,10 @@ type PruneStats struct {
 	BytesBefore       int64 `json:"bytes_before"`
 	BytesFreed        int64 `json:"bytes_freed"`
 	BytesRepacked     int64 `json:"bytes_repacked"`
+	// Backup files (one per backup).
+	FilesTotal   int `json:"files_total"`
+	FilesDeleted int `json:"files_deleted"`
+	FilesMerged  int `json:"files_merged"`
 }
 
 // Prune removes data no longer referenced by any snapshot. The caller must
@@ -83,15 +87,41 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 	if err != nil {
 		return st, err
 	}
+	var old []*Snapshot
+	for _, s := range snaps {
+		if s.bundle == "" {
+			old = append(old, s)
+		}
+	}
+	if err := r.prunePacks(ctx, old, opts, &st, logf); err != nil {
+		return st, err
+	}
+	if err := r.pruneBundles(ctx, snaps, opts, &st, logf); err != nil {
+		return st, err
+	}
+	if opts.DryRun {
+		return st, nil
+	}
+	return st, r.LoadIndex(ctx)
+}
+
+// prunePacks prunes the data of the older repository format (data/ and
+// index/), referenced only by snapshots in snapshots/.
+func (r *Repository) prunePacks(ctx context.Context, snaps []*Snapshot, opts PruneOptions, st *PruneStats, logf func(string, ...any)) error {
 	logf("finding data referenced by %d snapshots", len(snaps))
 	used, err := r.UsedBlobs(ctx, snaps)
 	if err != nil {
-		return st, err
+		return err
 	}
 	st.BlobsUsed = len(used)
 
 	// Decide for every pack which blobs are kept in it.
-	packs := r.idx.Packs()
+	var packs []PackInfo
+	for _, p := range r.idx.Packs() {
+		if p.File == "" {
+			packs = append(packs, p)
+		}
+	}
 	sort.Slice(packs, func(i, j int) bool { return packs[i].ID.String() < packs[j].ID.String() })
 	keptIn := map[id.ID]id.ID{} // blob -> pack holding the kept copy
 	type plan struct {
@@ -119,7 +149,7 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 	st.PacksTotal = len(plans)
 	for b := range used {
 		if _, ok := keptIn[b]; !ok {
-			return st, fmt.Errorf("blob %s is referenced but missing from the index; run 'herakles check' / 'herakles repair index'", b.Short())
+			return fmt.Errorf("blob %s is referenced but missing from the index; run 'herakles check' / 'herakles repair index'", b.Short())
 		}
 	}
 
@@ -137,7 +167,7 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 		}
 		return nil
 	}); err != nil {
-		return st, err
+		return err
 	}
 	st.UnreferencedPacks = len(unref)
 	for _, fi := range unref {
@@ -163,11 +193,19 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 	st.PacksRepacked = len(toRepack)
 	logf("%d packs: %d to delete, %d to repack, %d unchanged, %d unreferenced", len(plans), len(toDelete), len(toRepack), len(keep), len(unref))
 	if opts.DryRun {
-		return st, nil
+		return nil
 	}
 	if len(toDelete) == 0 && len(toRepack) == 0 && len(unref) == 0 && len(r.idx.Files()) <= 1 {
-		return st, nil
+		return nil
 	}
+	r.bmu.Lock()
+	r.legacy = true
+	r.bmu.Unlock()
+	defer func() {
+		r.bmu.Lock()
+		r.legacy = false
+		r.bmu.Unlock()
+	}()
 
 	// Repack: copy kept encrypted blobs verbatim (after verification).
 	before := id.Set{}
@@ -178,21 +216,21 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 		logf("repacking %d/%d", i+1, len(toRepack))
 		data, err := backend.LoadAll(ctx, r.be, backend.Handle{Type: backend.PackFile, Name: pl.info.ID.String()})
 		if err != nil {
-			return st, err
+			return err
 		}
 		for _, e := range pl.kept {
 			ct := data[e.Offset : e.Offset+e.Length]
 			if _, err := r.DecodeBlob(e.ID, ct); err != nil {
-				return st, fmt.Errorf("repack %s: %w", pl.info.ID.Short(), err)
+				return fmt.Errorf("repack %s: %w", pl.info.ID.Short(), err)
 			}
 			cp := append([]byte(nil), ct...)
 			if err := r.addToPacker(ctx, e.Type, e.ID, cp, int(e.RawLength)); err != nil {
-				return st, err
+				return err
 			}
 		}
 	}
 	if err := r.Flush(ctx); err != nil {
-		return st, err
+		return err
 	}
 
 	// Write a consolidated index containing only live data.
@@ -201,7 +239,7 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 		final = append(final, PackInfo{ID: pl.info.ID, Size: pl.info.Size, Blobs: pl.kept})
 	}
 	for _, p := range r.idx.Packs() {
-		if !before.Has(p.ID) {
+		if p.File == "" && !before.Has(p.ID) {
 			final = append(final, p)
 		}
 	}
@@ -209,7 +247,7 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 	logf("writing new index (%d packs)", len(final))
 	written, err := r.writeIndex(ctx, final)
 	if err != nil {
-		return st, err
+		return err
 	}
 	newSet := id.NewSet(written...)
 	for f := range oldIndex {
@@ -217,21 +255,21 @@ func (r *Repository) Prune(ctx context.Context, opts PruneOptions) (PruneStats, 
 			continue
 		}
 		if err := r.be.Remove(ctx, backend.Handle{Type: backend.IndexFile, Name: f.String()}); err != nil && !backend.IsNotFound(err) {
-			return st, err
+			return err
 		}
 	}
 	logf("deleting obsolete packs")
 	for _, pl := range append(toDelete, toRepack...) {
 		if err := r.be.Remove(ctx, backend.Handle{Type: backend.PackFile, Name: pl.info.ID.String()}); err != nil && !backend.IsNotFound(err) {
-			return st, err
+			return err
 		}
 	}
 	for _, fi := range unref {
 		if err := r.be.Remove(ctx, backend.Handle{Type: backend.PackFile, Name: fi.Name}); err != nil && !backend.IsNotFound(err) {
-			return st, err
+			return err
 		}
 	}
-	return st, r.LoadIndex(ctx)
+	return nil
 }
 
 // CheckOptions control repository verification.
@@ -248,6 +286,8 @@ type CheckResult struct {
 	Snapshots int      `json:"snapshots"`
 	Trees     int      `json:"trees"`
 	Packs     int      `json:"packs"`
+	Files     int      `json:"files"` // backup files
+	FilesRead int      `json:"files_read"`
 	PacksRead int      `json:"packs_read"`
 	BlobsRead int      `json:"blobs_read"`
 	BytesRead int64    `json:"bytes_read"`
@@ -281,7 +321,12 @@ func (r *Repository) Check(ctx context.Context, opts CheckOptions) (*CheckResult
 	}); err != nil {
 		return nil, err
 	}
-	packs := r.idx.Packs()
+	var packs []PackInfo
+	for _, p := range r.idx.Packs() {
+		if p.File == "" {
+			packs = append(packs, p)
+		}
+	}
 	res.Packs = len(packs)
 	indexed := id.Set{}
 	for _, p := range packs {
@@ -299,6 +344,10 @@ func (r *Repository) Check(ctx context.Context, opts CheckOptions) (*CheckResult
 		if !indexed.Has(pid) {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("pack %s is not referenced by any index (run prune to remove)", pid.Short()))
 		}
+	}
+
+	if err := r.checkBundles(ctx, opts, res); err != nil {
+		return nil, err
 	}
 
 	logf("checking snapshots and trees")
@@ -460,7 +509,10 @@ func (r *Repository) RebuildIndex(ctx context.Context, progress func(string)) (i
 
 // Stats summarises repository usage.
 type Stats struct {
-	Snapshots   int   `json:"snapshots"`
+	Snapshots int `json:"snapshots"`
+	Files     int `json:"files"` // backup files
+	// OldPacks are pack files of the older repository format in data/.
+	OldPacks    int   `json:"old_packs"`
 	Packs       int   `json:"packs"`
 	Blobs       int   `json:"blobs"`
 	DataBlobs   int   `json:"data_blobs"`
@@ -477,9 +529,23 @@ func (r *Repository) Stats(ctx context.Context) (Stats, error) {
 		return st, err
 	}
 	st.Snapshots = len(names)
+	if bundles, err := r.Bundles(ctx); err == nil {
+		forgotten, _ := r.forgottenSet(ctx)
+		for _, b := range bundles {
+			if b.Snapshot != nil && !forgotten.Has(b.Snapshot.id) {
+				st.Snapshots++
+			}
+		}
+	}
 	seen := id.Set{}
+	files := map[string]bool{}
 	for _, p := range r.idx.Packs() {
 		st.Packs++
+		if p.File == "" {
+			st.OldPacks++
+		} else {
+			files[p.File] = true
+		}
 		st.StoredBytes += p.Size
 		for _, b := range p.Blobs {
 			if seen.Has(b.ID) {
@@ -495,5 +561,6 @@ func (r *Repository) Stats(ctx context.Context) (Stats, error) {
 			}
 		}
 	}
+	st.Files = len(files)
 	return st, nil
 }

@@ -66,6 +66,15 @@ type Repository struct {
 	treeMu   sync.Mutex
 	trees    map[id.ID]*Tree
 	treeList []id.ID
+
+	bmu     sync.Mutex
+	bundles map[string]*Bundle // tables of contents of the backup files
+	bw      *bundleWriter      // the backup file being written
+	scope   id.Set             // blobs the running backup may refer to
+	// legacy writes packs to data/ with index files: prune uses it for
+	// data of the older repository format.
+	legacy bool
+	header []byte // start of every backup file: config and key envelopes
 }
 
 // Backend returns the underlying backend.
@@ -263,6 +272,9 @@ func (r *Repository) ListKeys(ctx context.Context) ([]KeyInfo, error) {
 
 // AddKey wraps the master key with new credentials.
 func (r *Repository) AddKey(ctx context.Context, creds crypto.Credentials, label string) (string, error) {
+	r.bmu.Lock()
+	r.header = nil
+	r.bmu.Unlock()
 	env, err := crypto.Wrap(r.key, creds, label)
 	if err != nil {
 		return "", err
@@ -272,6 +284,9 @@ func (r *Repository) AddKey(ctx context.Context, creds crypto.Credentials, label
 
 // RemoveKey deletes a key envelope. The key in use cannot be removed.
 func (r *Repository) RemoveKey(ctx context.Context, name string) error {
+	r.bmu.Lock()
+	r.header = nil
+	r.bmu.Unlock()
 	if name == r.keyName {
 		return errors.New("refusing to remove the key currently in use")
 	}
@@ -299,6 +314,9 @@ func (r *Repository) RemoveKey(ctx context.Context, name string) error {
 
 // ChangeKey replaces the current key envelope with one for new credentials.
 func (r *Repository) ChangeKey(ctx context.Context, creds crypto.Credentials) error {
+	r.bmu.Lock()
+	r.header = nil
+	r.bmu.Unlock()
 	old := r.keyName
 	name, err := r.AddKey(ctx, creds, "changed key")
 	if err != nil {
@@ -309,4 +327,7 @@ func (r *Repository) ChangeKey(ctx context.Context, creds crypto.Credentials) er
 }
 
 // Close flushes nothing; callers must call Flush before closing.
-func (r *Repository) Close() error { return r.be.Close() }
+func (r *Repository) Close() error {
+	r.AbortBackup()
+	return r.be.Close()
+}

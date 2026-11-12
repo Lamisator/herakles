@@ -33,7 +33,7 @@
       <ol><li><a href="#locations">Storage locations</a></li><li><a href="#passwords">Passwords and key files</a></li><li><a href="#repo-options">Repository options</a></li></ol></li>
     <li><a href="#jobs">Backup jobs</a>
       <ol><li><a href="#sources">Sources</a></li><li><a href="#excludes">Exclusions</a></li></ol></li>
-    <li><a href="#types">Backup types</a></li>
+    <li><a href="#types">Backup types</a><ol><li><a href="#portable">Portable backup files</a></li></ol></li>
     <li><a href="#schedules">Schedules</a></li>
     <li><a href="#retention">Retention</a></li>
     <li><a href="#background">Running in the background</a>
@@ -50,7 +50,7 @@
     <li><a href="#web">Web interface &amp; accounts</a>
       <ol><li><a href="#web-setup">Setting it up</a></li><li><a href="#web-accounts">Accounts and passkeys</a></li><li><a href="#web-proxy">Behind a reverse proxy</a></li></ol></li>
     <li><a href="#hub">Central management (hub)</a>
-      <ol><li><a href="#hub-enroll">Attaching a server</a></li><li><a href="#hub-manage">Managing servers</a></li><li><a href="#hub-repos">Shared repositories</a></li><li><a href="#hub-protocol">How the connection is secured</a></li></ol></li>
+      <ol><li><a href="#hub-enroll">Attaching a server</a></li><li><a href="#hub-manage">Managing servers</a></li><li><a href="#hub-compat">Versions and compatibility</a></li><li><a href="#hub-repos">Shared repositories</a></li><li><a href="#hub-protocol">How the connection is secured</a></li></ol></li>
     <li><a href="#replication">Copies and the 3‑2‑1 rule</a></li>
     <li><a href="#hooks">Hooks and notifications</a></li>
     <li><a href="#maintenance">Maintenance</a></li>
@@ -218,7 +218,7 @@ herakles snapshots --repo /mnt/usb/backup</pre>
   <dt><strong>Retention</strong></dt><dd>Rules that decide which old snapshots are kept. Removing a snapshot is called <em>forget</em>; freeing the space it used is called <em>prune</em>.</dd>
   <dt><strong>Daemon</strong></dt><dd>The background process that runs jobs on their schedules: the tray or the system service.</dd>
 </dl>
-<p>Because data is deduplicated, a snapshot only adds the chunks that are new. A daily backup of 500 GB where 2 GB changed adds about 2 GB, and every snapshot is still complete. Deleting any snapshot never breaks another one, unlike tape-style incremental chains.</p>
+<p>Each backup is one file. An incremental backup only adds the chunks that are new: a daily backup of 500 GB where 2 GB changed adds a file of about 2 GB, and every snapshot is still complete. Forgetting a snapshot never breaks another one: files that later backups still need are kept until those are gone too.</p>
 
 <h2 id="repositories">Repositories</h2>
 <p>A repository is created once with <code>herakles init</code> (or <strong>Initialize</strong> in the GUI). It is defined in the configuration like this:</p>
@@ -319,14 +319,20 @@ herakles key remove --repo usb-disk &lt;KEY-ID&gt;</pre>
 </table>
 
 <h2 id="types">Backup types</h2>
-<p>The type decides how Herakles finds what changed. Thanks to deduplication, all types store unchanged data only once, and <strong>every snapshot is complete and can be restored on its own</strong>.</p>
+<p>Every backup is written as <strong>one file</strong> in the repository's <code>backups/</code> folder, named after time, job and type (<code>20261112-031500_docker_full_3fa9c1d2e4b6.hbk</code>). The type decides what Herakles reads and what goes into the file. Whatever the type, <strong>every snapshot is complete</strong>: restoring it gives all its files.</p>
 <table>
-<tr><th>Type</th><th>What it reads</th><th>Use it for</th></tr>
-<tr><td><code>full</code></td><td>Every byte of every file, without relying on earlier snapshots. Also catches changes that didn't update the file's modification time.</td><td>A weekly or monthly run that verifies everything.</td></tr>
-<tr><td><code>incremental</code></td><td>Only files whose size, modification time, change time or inode differ from the latest snapshot of the job.</td><td>Fast daily or hourly runs.</td></tr>
-<tr><td><code>differential</code></td><td>Like incremental, but compared with the latest <em>full</em> snapshot.</td><td>When you prefer comparing with a fixed baseline.</td></tr>
-<tr><td><code>auto</code> (default)</td><td>Incremental, but full when the last full backup is older than the job's <code>full_interval</code> (for example <code>7d</code>). The very first backup is always full.</td><td>A single schedule that takes care of itself.</td></tr>
+<tr><th>Type</th><th>What it reads and stores</th><th>Use it for</th></tr>
+<tr><td><code>full</code></td><td>Every byte of every file, without relying on earlier backups (also catches changes that didn't update a file's modification time). It stores all of it, so the file restores <b>on its own</b>.</td><td>A weekly or monthly run that verifies everything and starts a new chain.</td></tr>
+<tr><td><code>incremental</code></td><td>Only files whose size, modification time, change time or inode differ from the latest snapshot of the job. It stores only data its <b>chain</b> (the files from the last full backup on) does not have yet.</td><td>Fast, small daily or hourly runs.</td></tr>
+<tr><td><code>differential</code></td><td>Like incremental, but builds on the latest <em>full</em> backup: its chain is always two files.</td><td>When you prefer a fixed baseline.</td></tr>
+<tr><td><code>auto</code> (default)</td><td>Incremental, but full when the last full backup is older than the job's <code>full_interval</code> (for example <code>7d</code>). The first backup is always full.</td><td>A single schedule that takes care of itself.</td></tr>
 </table>
+<p>Data is deduplicated within a file and a chain, and compressed. Full backups cost space, because they store everything again, but they cut chains: a full backup and the incrementals after it can be copied, moved or deleted together. Without <code>full_interval</code>, <code>auto</code> keeps adding incrementals; when the oldest backups have expired, <code>prune</code> merges what the newer ones still need into one file, so the chain does not grow forever.</p>
+<h3 id="portable">Portable backup files</h3>
+<p>A backup file carries the repository's settings and its password-protected keys. Copy a full backup file, or a chain of files, to a USB disk or another storage, and open that folder like a repository with the password alone (read-only):</p>
+<pre>herakles snapshots --repo /media/usb/backups
+herakles restore --repo /media/usb/backups latest --target /restore</pre>
+<p>In the GUI, the details of a snapshot show its file and which files a restore needs. Repositories of versions before 0.13 keep working: their snapshots stay readable, and the next backup of each job is a full backup in a file of its own.</p>
 <p>Run a specific type by hand with <code>herakles backup home --type full</code>, or with the Full / Incremental / Differential buttons in the GUI.</p>
 
 <h2 id="schedules">Schedules</h2>
@@ -799,17 +805,19 @@ herakles hub status</pre>
 
 <h3 id="hub-manage">Managing servers</h3>
 <p>Attached servers appear on the <b>Servers</b> page with their state, system, version and the result of their jobs. Pick one under <b>Managing</b> at the top of the menu (or click <b>Manage</b>): a blue bar shows which server you are working on, and every page acts on that server until you switch back. Plain users of the hub get the same rights on the servers as on the hub (run, browse, restore, no configuration and no secrets).</p>
-<pre>herakles hub servers                    <span class="c"># NAME  ID  STATE  HOST  SYSTEM  VERSION  LAST SEEN</span>
+<pre>herakles hub servers                    <span class="c"># NAME  ID  STATE  HOST  SYSTEM  VERSION  COMPATIBILITY  LAST SEEN</span>
 herakles hub rename web-1 web-frontend
 herakles hub remove web-frontend        <span class="c"># it can no longer connect</span>
 sudo herakles hub leave                 <span class="c"># on the server: detach it (or Configuration → Leave the hub)</span></pre>
-<p>A removed or detached server keeps running its backups on its own. Update hub and servers together; the Servers page marks servers with another version.</p>
+<p>A removed or detached server keeps running its backups on its own.</p>
+<h3 id="hub-compat">Versions and compatibility</h3>
+<p>Each server announces its version and its <b>capabilities</b> when it connects; for versions before 0.13, which announce none, the hub derives them from the version. The hub compares them with its own in both directions. The <b>Servers</b> page shows each server's version with a badge: <i>compatible</i>, <i>limitations</i> (a function is missing, for example browsing disk images on a 0.11 server) or <i>incompatible</i> (for example a server that cannot read backups stored as one file per backup), lists each problem with its consequence and says which side to update. A banner sums them up, incompatible servers are marked in the <b>Managing</b> menu, and the hub logs them when they connect. Servers from 0.11 on update themselves (tray menu, window or <code>herakles update</code>).</p>
 
 <h3 id="hub-repos">Shared repositories</h3>
 <p>While you manage a server, its backup wizard and job editor also offer the hub's repositories (“from the hub”). Choosing one there shares it: the hub passes it on before the job is saved. You can also pick them in advance under <b>Servers → Repositories for all servers</b>, or in the configuration:</p>
 <pre>hub:
   repositories: [storagebox]</pre>
-<p>They are passed to each server <b>with their passwords</b> on every connection and after every change, so there is one password to keep and the servers need no credentials of their own. On a server they appear with “from the hub” and cannot be edited there; the password (and key, SSH and CA files) are stored in <code>&lt;state_dir&gt;/hub/repositories/</code> with mode 0600. Several servers backing up into one repository share one deduplicated store: their snapshots are kept apart by host name (see <b>Systems</b>), retention groups by host, and pruning and checks of a shared repository run only on the hub. A repository of the server with the same name wins over the hub's. When a repository is no longer shared, it is removed from the servers, unless a job there still uses it.</p>
+<p>They are passed to each server <b>with their passwords</b> on every connection and after every change, so there is one password to keep and the servers need no credentials of their own. On a server they appear with “from the hub” and cannot be edited there; the password (and key, SSH and CA files) are stored in <code>&lt;state_dir&gt;/hub/repositories/</code> with mode 0600. Several servers can back up into one repository; each backup is a file of its own, and a server's incrementals build only on its own full backups. Their snapshots are kept apart by host name (see <b>Systems</b>), retention groups by host, and pruning and checks of a shared repository run only on the hub. A repository of the server with the same name wins over the hub's. When a repository is no longer shared, it is removed from the servers, unless a job there still uses it.</p>
 
 <h3 id="hub-protocol">How the connection is secured</h3>
 <figure class="frame"><img src="img/hub-protocol.webp" width="1500" height="2147" loading="lazy" alt="Sequence diagram: enrollment code, enrollment with signed answer, signed connection over a WebSocket, and forwarded requests"></figure>

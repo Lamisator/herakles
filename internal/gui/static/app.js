@@ -573,6 +573,10 @@ views.snapshots = async main => {
         kv('Snapshot', h('span', { class: 'mono' }, s.id)),
         kv('Created', fmtTime(s.time) + (sm && sm.end && !sm.end.startsWith('0001') ? ' · took ' + fmtDur((new Date(sm.end) - new Date(sm.start)) * 1e6) : '')),
         kv('Based on', s.parent ? h('span', {}, h('span', { class: 'mono' }, short(s.parent)), parent ? ' (' + parent.type + ', ' + fmtTime(parent.time) + ')' : ' (no longer in the repository)') : (s.type === 'full' ? 'nothing (self-contained full backup)' : null)),
+        kv('Backup file', s.file ? h('span', {}, h('span', { class: 'mono' }, s.file), ' · ',
+          (s.chain || []).length > 1
+            ? h('span', { title: 'To restore it elsewhere, copy these files together:\n' + s.chain.join('\n') }, 'restoring needs ' + s.chain.length + ' files (' + fmtBytes(s.chain_bytes) + ')')
+            : 'restorable on its own (' + fmtBytes(s.chain_bytes) + ')') : 'older repository format (shared data files)'),
         kv('Files', sm ? n(sm.total_files) + ' files · ' + n(sm.files_new) + ' new, ' + n(sm.files_changed) + ' changed, ' + n(sm.files_unmodified) + ' unchanged' : null),
         kv('Data', sm ? fmtBytes(sm.total_bytes) + ' in the snapshot · ' + fmtBytes(sm.bytes_added) + ' new data · ' + fmtBytes(sm.bytes_stored) + ' written after compression' : null),
         kv('Read errors', sm && sm.errors ? h('div', { class: 'err-text' }, sm.errors + ' file(s) could not be read', (sm.error_samples || []).map(e => h('div', { class: 'mono' }, e))) : null),
@@ -835,7 +839,7 @@ async function editJob(name) {
       h('div', { class: 'toolbar' }, h('button', { onclick: () => addSched({ cron: '', type: 'auto' }) }, '+ Add schedule'), presets),
       schedBox,
       h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Make "auto" backups full every'), f.fullInterval), h('div', {}, h('label', {}, 'Tags'), f.tags)),
-      h('div', { class: 'hint' }, 'full: re-reads everything · incremental: changes since last snapshot · differential: changes since last full · all snapshots are complete and deduplicated.'),
+      h('div', { class: 'hint' }, 'Every backup is one file. full: re-reads everything and stores it in a file that restores on its own · incremental: changes since the last backup · differential: changes since the last full · every snapshot restores completely.'),
       h('label', { class: 'check' }, f.catchUp, 'Run missed backups when the daemon starts'), h('label', { class: 'check' }, f.disabled, 'Disabled (not scheduled)')),
     h('fieldset', {}, h('legend', {}, 'Retention (a snapshot is kept if any rule matches; empty = keep all)'),
       h('div', { class: 'row4' }, ['keep_last', 'keep_hourly', 'keep_daily', 'keep_weekly', 'keep_monthly', 'keep_yearly', 'keep_full'].map(k =>
@@ -1978,9 +1982,35 @@ async function renderTargets() {
     switchTarget(x ? { id: x.id, name: x.name, online: x.online } : null);
   } },
   h('option', { value: '' }, (state.hubInfo.hostname || 'this computer') + ' (hub)'),
-  servers.map(x => h('option', { value: x.id, selected: state.target && state.target.id === x.id }, (x.online ? '● ' : '○ ') + x.name + (x.online ? '' : ' (offline)'))));
+  servers.map(x => h('option', { value: x.id, selected: state.target && state.target.id === x.id }, (x.online ? '● ' : '○ ') + x.name + (x.online ? '' : ' (offline)') + (x.compat && x.compat.status === 'error' ? ' ⚠ incompatible' : ''))));
   box.append(h('label', {}, 'Managing'), sel);
 }
+// compatChip shows whether a server and this hub work together.
+function compatChip(x) {
+  const c = x.compat || {};
+  const hubV = state.hubInfo && state.hubInfo.version;
+  const other = hubV && x.hello && x.hello.version && x.hello.version !== hubV ? ' · hub has ' + hubV : '';
+  switch (c.status) {
+    case 'error': return h('span', { class: 'badge failure', title: 'Some things do not work between this server and the hub; see below' }, 'incompatible' + other);
+    case 'warning': return h('span', { class: 'badge warning', title: 'Some functions are not available; see below' }, (c.issues || []).length + ' limitation' + ((c.issues || []).length === 1 ? '' : 's') + other);
+    case 'ok': return h('span', { class: 'badge success', title: 'Server and hub have the same capabilities' + (c.derived ? ' (derived from its version)' : '') }, 'compatible' + other);
+  }
+  return h('span', { class: 'badge', title: 'The server has not connected yet' }, 'not connected yet');
+}
+
+function compatIssues(x) {
+  const c = x.compat || {};
+  if (!(c.issues || []).length) return null;
+  const hubV = state.hubInfo && state.hubInfo.version;
+  const fix = c.newer === 'hub' || c.issues.some(i => i.side === 'server')
+    ? 'Update ' + x.name + (hubV ? ' to ' + hubV : '') + ' (it can update itself from version 0.11 on: tray menu, window or "herakles update").'
+    : 'Update this hub' + (x.hello && x.hello.version ? ' to ' + x.hello.version : '') + ' (window: Install update, or "herakles update").';
+  return h('div', { class: 'compat' },
+    h('ul', {}, c.issues.map(i => h('li', { class: i.severity === 'error' ? 'bad-text' : 'warn-text' },
+      h('b', {}, i.side === 'hub' ? 'This hub: ' : 'Server: '), i.message))),
+    h('div', { class: 'muted' }, fix + (c.derived ? ' Its capabilities were derived from its version; versions before 0.13 do not announce them.' : '')));
+}
+
 function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => toast('Copied')); return; }
   const t = h('textarea', {}, text); document.body.append(t); t.select();
@@ -1995,6 +2025,13 @@ views.servers = async main => {
     h('div', { class: 'toolbar' },
       isAdmin() ? h('button', { class: 'primary', title: 'Create a one-time code that attaches another server to this hub', onclick: enrollDlg }, '+ Enroll a server') : null,
       h('button', { title: 'Reload the list', onclick: () => navigate('servers') }, 'Refresh')));
+  const bad = data.servers.filter(x => x.compat && (x.compat.status === 'error' || x.compat.status === 'warning'));
+  if (bad.length) {
+    const errs = bad.filter(x => x.compat.status === 'error').length;
+    main.append(h('div', { class: 'notice warn' }, icon('alert'),
+      errs ? errs + (errs === 1 ? ' server is' : ' servers are') + ' not compatible with this hub' + (bad.length > errs ? ', ' + (bad.length - errs) + ' more with limitations' : '') + ': ' + bad.map(x => x.name).join(', ') + '. Details below.'
+        : bad.length + (bad.length === 1 ? ' server has' : ' servers have') + ' limitations with this hub: ' + bad.map(x => x.name).join(', ') + '. Details below.'));
+  }
   const grid = h('div', { class: 'grid' });
   if (!data.servers.length) {
     grid.append(h('div', { class: 'empty' }, 'No servers attached yet. Install Herakles on a server, then enroll it with a code from "Enroll a server".'));
@@ -2006,8 +2043,8 @@ views.servers = async main => {
     grid.append(h('div', { class: 'card' },
       h('h3', {}, icon('server'), x.name, h('span', { class: 'badge ' + (x.online ? 'success' : '') }, x.online ? 'online' : 'offline')),
       h('div', { class: 'meta' }, [hel.hostname, hel.os && hel.os + '/' + hel.arch, hel.container && 'container (' + hel.container + ')'].filter(Boolean).join(' · ')),
-      h('div', { class: 'meta' }, 'Herakles ', hel.version || '?',
-        hel.version && state.hubInfo && hel.version !== state.hubInfo.version ? h('span', { class: 'chip', title: 'Hub and server run different versions; some pages may not work until both are updated' }, 'hub has ' + state.hubInfo.version) : null),
+      h('div', { class: 'meta' }, 'Herakles ', h('b', {}, hel.version || '?'), ' ', compatChip(x)),
+      compatIssues(x),
       h('div', { class: 'meta' }, x.online ? 'Connected since ' + fmtTime(x.since) : 'Last seen ' + ago(x.last_seen), x.address ? ' from ' + x.address : ''),
       x.sync_error ? h('div', { class: 'meta', style: 'color:var(--err)' }, 'Repositories not passed on: ' + x.sync_error) : null,
       (sync.conflicts || []).length ? h('div', { class: 'meta', style: 'color:var(--warn)' }, 'Not passed on, the server has its own repository with that name: ' + sync.conflicts.join(', ')) : null,
@@ -2041,7 +2078,7 @@ views.servers = async main => {
   const boxes = own.map(r => { const c = h('input', { type: 'checkbox', checked: shared.has(r.name), disabled: !isAdmin() }); c.dataset.name = r.name; return c; });
   main.append(h('h2', {}, 'Repositories for all servers'),
     h('div', { class: 'card' },
-      h('div', { class: 'meta' }, 'These repositories are passed to every attached server, with their passwords: the servers need no credentials of their own, and backups of several servers share one deduplicated store. Pruning and checks of shared repositories run here on the hub.'),
+      h('div', { class: 'meta' }, 'These repositories are passed to every attached server, with their passwords: the servers need no credentials of their own. Each backup is one file in the repository; a server’s incremental backups build on its own full backups. Pruning and checks of shared repositories run here on the hub.'),
       own.length ? h('div', { class: 'checks' }, own.map((r, i) => h('label', { class: 'check' }, boxes[i], ' ', h('b', {}, r.name), ' ', h('span', { class: 'muted mono' }, r.location)))) : h('div', { class: 'muted' }, 'Add a repository first (Repositories).'),
       isAdmin() && own.length ? h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: async () => {
         try {

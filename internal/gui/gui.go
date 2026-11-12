@@ -750,6 +750,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 type snapView struct {
 	ID string `json:"id"`
 	*repository.Snapshot
+	// File is the backup file holding the snapshot; Chain lists the files
+	// a restore needs (its own first), ChainBytes their size.
+	File       string   `json:"file,omitempty"`
+	Chain      []string `json:"chain,omitempty"`
+	ChainBytes int64    `json:"chain_bytes,omitempty"`
 }
 
 func (s *Server) snapshots(w http.ResponseWriter, r *http.Request) {
@@ -763,9 +768,20 @@ func (s *Server) snapshots(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err, "")
 		return
 	}
+	bundles, err := repo.Bundles(r.Context())
+	if err != nil {
+		s.fail(w, err, "")
+		return
+	}
 	out := []snapView{}
 	for i := len(all) - 1; i >= 0; i-- {
-		out = append(out, snapView{all[i].ID().String(), all[i]})
+		v := snapView{ID: all[i].ID().String(), Snapshot: all[i], File: all[i].File()}
+		chain, _ := repository.ChainIn(bundles, all[i])
+		for _, b := range chain {
+			v.Chain = append(v.Chain, b.Name)
+			v.ChainBytes += b.Size
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, 200, out)
 }

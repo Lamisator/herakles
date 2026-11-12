@@ -23,14 +23,15 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | Area | What you get |
 |---|---|
 | **Sources** | Files and directories; whole **disks/partitions as raw images** (`/dev/sda1`, `/dev/nvme0n1`, `\\.\C:`, `\\.\PhysicalDrive0`). Metadata includes permissions, owner, timestamps, symlinks, FIFOs, device nodes and Linux extended attributes. |
-| **Space saving** | Content‑defined chunking (FastCDC with a secret, per‑repository gear table) deduplicates data across files, snapshots and hosts. Blobs are stored in pack files. Compression is zstd, with auto‑detection of incompressible data. |
+| **Space saving** | Content‑defined chunking (FastCDC with a secret, per‑repository gear table) deduplicates data across files and within a backup chain. Compression is zstd, with auto‑detection of incompressible data. |
+| **Portable backups** | Every backup is **one file** (`backups/*.hbk`). A full backup restores on its own; incrementals need only their chain. Copy the files anywhere (USB disk, other storage) and open them with the password alone. |
 | **Backup types** | `full` re‑reads everything, `incremental` reads only what changed since the last snapshot, `differential` reads what changed since the last *full* snapshot, and `auto` is incremental but becomes full once `full_interval` has passed. **Every snapshot is complete and independently restorable.** |
 | **Retention** | Fully configurable rules: `keep_last`, `keep_hourly/daily/weekly/monthly/yearly`, `keep_full`, `keep_within`, `keep_within_{hourly,daily,weekly,monthly,yearly}`, `keep_tags` and `group_by`. Rules are applied per job after every backup, with optional immediate prune. |
 | **Encryption** | AES‑256‑GCM for all data and metadata. Keyed HMAC‑SHA256 content IDs, so blob IDs leak nothing. The master key is wrapped with Argon2id using a **password, a key file, or both**. A repository can have several keys (add, remove, change). |
 | **Storage** | Local path, mounted NFS/CIFS share, UNC path, `smb://` (no mount needed), `sftp://` and `herakles://` (repository server). Upload and download bandwidth can be limited. |
 | **Client/server (optional)** | HTTPS repository server with bcrypt users, per‑user repository ACLs, **append‑only mode** (protects against ransomware deleting backups), quotas and a self‑signed certificate generator. The server never sees plaintext or keys. |
 | **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** (on Windows with a setup, no console needed) and has a token‑protected local control API. |
-| **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index from pack headers. Restores can be verified. Interrupted backups resume (indexes are written periodically). |
+| **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index of older‑format data from pack headers. Restores can be verified. A backup file appears only once it is complete; an interrupted backup leaves nothing behind (and starts over). |
 | **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and the GUI **explorer** (preview, search, multi-select) with downloads as ZIP, tar.gz or tar — also of files **inside disk images** (ext2/3/4, FAT, NTFS; MBR/GPT). |
 | **Databases** | A `databases:` section dumps PostgreSQL, MySQL/MariaDB, MongoDB and SQLite running on the host with their own tools (`pg_dump`, `mysqldump`/`mariadb-dump`, `mongodump`, `sqlite3`) while they keep running. The dumps are streamed straight into the snapshot (no temporary files) and deduplicated like everything else. `herakles databases restore` and the GUI load a dump back into the server, also into a new database next to the current one. |
 | **Docker** | A `docker:` section makes a job back up every Compose project (and standalone container) as its own snapshot `JOB/PROJECT`: project directory, bind mounts, named volumes (also of stopped projects) and dumps of Postgres, MySQL/MariaDB and MongoDB. Projects can be stopped during their backup instead. `herakles docker restore` stops the project, restores everything, starts it and loads the dumps into fresh databases, with automatic rollback. |
@@ -118,12 +119,12 @@ herakles backup --repo /mnt/usb/backup --device /dev/nvme0n1p2      # partition 
 
 ### Snapshots and backup types
 
-Each backup creates a **snapshot**: a complete, immutable view of the sources. Because data is deduplicated, a snapshot only adds the chunks that are new. The backup *type* decides how much work Herakles does to find changes:
+Each backup creates a **snapshot**: a complete, immutable view of the sources, written as **one file** in the repository's `backups/` folder, named after time, job and type (`20261112-031500_docker_full_3fa9c1d2e4b6.hbk`). The backup *type* decides what Herakles reads and what the file contains:
 
-* **full** reads and hashes every byte. It never relies on earlier snapshots, so silent changes (for example a file modified without a new mtime) are caught. Unchanged data is still stored only once.
-* **incremental** compares size, mtime, ctime and inode with the latest snapshot of the job and reads only changed files. This is very fast.
-* **differential** does the same as incremental, but compares with the latest **full** snapshot.
-* **auto** is the default. It runs incremental, but runs full if the last full backup is older than the job's `full_interval` (for example `7d`). With no earlier snapshot, the backup is always full.
+* **full** reads and hashes every byte and stores all of it in its own file. It never relies on earlier backups, so silent changes (for example a file modified without a new mtime) are caught, and the file restores on its own. Within the file, data is deduplicated.
+* **incremental** compares size, mtime, ctime and inode with the latest snapshot of the job, reads only changed files and stores only data its **chain** (the files from the last full backup on) does not have yet. This is very fast and small.
+* **differential** does the same as incremental, but builds on the latest **full** backup: its chain is two files.
+* **auto** is the default. It runs incremental, but runs full if the last full backup is older than the job's `full_interval` (for example `7d`). With no earlier backup in this format, the backup is always full.
 
 A typical "full on Sunday, incremental on weekdays, keep a month back" setup looks like this:
 
@@ -138,7 +139,9 @@ retention:
   keep_full: 2
 ```
 
-Unlike tape‑style incremental chains, deleting any snapshot never breaks another one.
+Every snapshot is complete: restoring one gives all its files, whatever its type. Forgetting a snapshot never breaks another one: a file that later backups still need stays (its snapshot hidden) until they are gone too. When the oldest backups of a chain have expired but newer ones still build on them, `prune` merges what is still needed into one file that replaces them, so a chain without new full backups (`auto` without `full_interval`) does not grow forever. Full backups cost space (they store everything again) but cut chains: each full backup and the incrementals after it can be copied, moved or deleted together.
+
+**Portable.** A backup file carries the repository's settings and its password‑protected keys. A folder with nothing but copied `.hbk` files — a chain, or a single full backup — is a read‑only repository: `herakles snapshots --repo /media/usb/backups`, `herakles restore --repo /media/usb/backups latest --target /restore`, or the GUI. The window's snapshot details show each backup's file and which files a restore needs.
 
 ### Retention
 
@@ -397,9 +400,11 @@ hub:
   repositories: [storagebox]   # passed to every attached server, with its password
 ```
 
-While a server is managed from the hub, its wizard and job editor also offer the hub's repositories; choosing one shares it before the job is saved. Shared repositories arrive on the servers as `hub: true` entries; their password (and key, SSH and CA files) go to `<state_dir>/hub/repositories/` (mode 0600), so no server needs credentials of its own and backups of all servers share one deduplicated store. Snapshots are kept apart by host name, retention groups by host, and pruning/checks of shared repositories run only on the hub (their maintenance schedule is not passed on). A repository of the server with the same name wins. `herakles hub leave` detaches a server and keeps the repositories as ordinary ones; `herakles hub servers|rename|remove` manage the servers on the hub.
+While a server is managed from the hub, its wizard and job editor also offer the hub's repositories; choosing one shares it before the job is saved. Shared repositories arrive on the servers as `hub: true` entries; their password (and key, SSH and CA files) go to `<state_dir>/hub/repositories/` (mode 0600), so no server needs credentials of its own; each server's backups go into their own files (a server's incrementals build only on its own full backups). Snapshots are kept apart by host name, retention groups by host, and pruning/checks of shared repositories run only on the hub (their maintenance schedule is not passed on). A repository of the server with the same name wins. `herakles hub leave` detaches a server and keeps the repositories as ordinary ones; `herakles hub servers|rename|remove` manage the servers on the hub.
 
 **Protocol.** The server makes its own Ed25519 key pair at enrollment and sends the public half with the secret; the hub stores only that and a hash of the used-up secret, and signs its answer with its identity key, which the server checks against the code. On every connection the server signs a login with a timestamp and nonce (replays and clocks off by more than 5 minutes are refused), and the hub signs the nonce back in the WebSocket handshake. HTTP requests then run over streams multiplexed on that WebSocket (yamux). Plain users of the hub get the same limits on the servers as on the hub; answers from servers are sandboxed so a server cannot run scripts in the hub's pages. **Whoever administers the hub controls the attached servers completely** (backups run as root and jobs can run hooks) — attach only servers the hub's administrators may control. A diagram is in the [guide](https://herakles.kloeck-it.de/guide.html#hub).
+
+**Versions and compatibility.** Each server announces its version and **capabilities** when it connects (versions before 0.13 announce none; the hub derives theirs from the version). The hub compares them with its own, in both directions, and shows the result on **Servers** and in `herakles hub servers`: *compatible*, *limitations* (a page or function is missing, e.g. browsing disk images on a 0.11 server) or *incompatible* (e.g. a server that cannot read backups stored as one file per backup), each with the consequence and which side to update. Incompatible servers are also logged and marked in the *Managing* menu. The list of capabilities is in `internal/hub/compat.go`; a new one is added whenever hub and servers depend on each other for it (a shared storage format, an API the hub's window calls, a protocol change).
 
 ---
 
@@ -460,18 +465,29 @@ A container sees the host's disks in `/sys`, but cannot read them: their device 
 
 ---
 
-## Repository format (v1)
+## Repository format
 
 ```
 config                plaintext: version, id, chunker parameters
 keys/<id>             Argon2id-wrapped master keys
-data/<xx>/<id>        pack files: [AES-GCM blobs…][encrypted header][4-byte header length]
-index/<id>            encrypted list of packs and their blobs
-snapshots/<id>        encrypted snapshot metadata
+backups/<name>.hbk    one file per backup (below)
+forgotten/<id>        marks a snapshot inside a backup file as forgotten
 locks/<id>            encrypted lock files
+data/, index/, snapshots/   older format (before 0.13): read, pruned, no longer written
 ```
 
-Blobs are `zstd(plaintext)` with a 1‑byte algorithm header and are encrypted individually with AES‑256‑GCM and a random nonce. Blob IDs are `HMAC‑SHA256(mac_key, plaintext)`. Files are named after the SHA‑256 of their stored bytes, so storage corruption is detectable.
+A backup file:
+
+```
+"HERAKLES-BACKUP1" | header length (4) | header: config + key envelopes (JSON)
+packs: [AES-GCM blobs…][encrypted pack header][4-byte length]  …
+encrypted table of contents: packs with offsets, parent file, replaced files, encrypted snapshot
+table of contents length (8) | "HKBEND01"
+```
+
+Blobs are `zstd(plaintext)` with a 1‑byte algorithm header and are encrypted individually with AES‑256‑GCM and a random nonce. Blob IDs are `HMAC‑SHA256(mac_key, plaintext)`. Packs are named after the SHA‑256 of their bytes, snapshots after the SHA‑256 of their encrypted form, so storage corruption is detectable (`check --read-data`). Backup files are streamed to the storage while the backup runs and appear under their name only when complete. `check` also verifies that every snapshot refers only to data in its own chain.
+
+Repositories of earlier versions keep working: their snapshots stay readable and are pruned as before, and the first backup of a job in 0.13 is a full backup in a file of its own. Herakles before 0.13 does not see backups stored as files (the hub flags such servers).
 
 ---
 
@@ -506,6 +522,8 @@ The suite covers:
 * Storage use: repository size and capacity without a password, the server's quota and free space.
 * Updates: version order, signed announcements (tampered or foreign signatures refused), checksum checks, replacing the program file, one notice per release, the tray's update entry and desktop notification over D‑Bus, the window's update API; plus runs against a local release server with the real key: `herakles update`, the window's Install button (file replaced, tray restarted as the new version), and on Wine a v0.10.0 setup install updated through the tray menu by the v0.11.0 setup.
 * Windows setup: unattended and interactive installs (whole computer, own files, install only), upgrade and uninstall, run under Wine (service, shared window, tray autostart, PATH, Start menu entry, Add/Remove Programs).
+* Backup files: one file per backup (no pack, index or snapshot files), chains (incrementals store only what their chain lacks, full backups store everything), a partial copy of one chain restores, forgetting and pruning (whole chains deleted, an expired chain start merged into a replacing file, further incrementals build through it), aborted and failed uploads leave nothing, corruption found, older-format data next to backup files (read, forgotten, pruned; the next backup is full), folders of copied `.hbk` files and single files opened read-only with the password; streams on local, SFTP, memory and the repository server (quota enforced while streaming); the CLI round trip backup → copy files → restore.
+* Hub compatibility: capabilities announced and derived from old versions, issues in both directions, unknown capabilities of newer servers; a v0.12.3 server attached to a v0.13 hub is shown as incompatible with the reason.
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 
 ## Current limitations

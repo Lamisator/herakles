@@ -228,7 +228,7 @@ func (rn *Runner) do(ctx context.Context, r *Run) error {
 		}
 		st, err := e.Prune(ctx, repo, rc.Maintenance.RepackThreshold, false, func(m string) { rn.setMessage(r, m) })
 		if err == nil {
-			log.Info("prune finished", "packs_deleted", st.PacksDeleted, "packs_repacked", st.PacksRepacked, "bytes_freed", st.BytesFreed)
+			log.Info("prune finished", "files_deleted", st.FilesDeleted, "files_merged", st.FilesMerged, "packs_deleted", st.PacksDeleted, "packs_repacked", st.PacksRepacked, "bytes_freed", st.BytesFreed)
 		}
 		return err
 	case KindCheck:

@@ -327,6 +327,14 @@ func (s *Server) object(w http.ResponseWriter, r *http.Request, be *backend.Loca
 				return
 			}
 		}
+		if h.Type == backend.ForgetFile && s.appendOnly(u) {
+			http.Error(w, "repository is append-only: forgetting snapshots denied", http.StatusForbidden)
+			return
+		}
+		if h.Type == backend.BundleFile {
+			s.saveStream(w, r, be, repo, h)
+			return
+		}
 		if r.ContentLength > MaxObjectSize {
 			http.Error(w, "object too large", http.StatusRequestEntityTooLarge)
 			return
@@ -447,4 +455,49 @@ func (s *Server) space(w http.ResponseWriter, repo string) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(sp)
+}
+
+// quotaReader fails once more than left bytes were read.
+type quotaReader struct {
+	r    io.Reader
+	n    int64
+	left int64 // < 0: no quota
+}
+
+var errQuota = errors.New("repository quota exceeded")
+
+func (q *quotaReader) Read(p []byte) (int, error) {
+	n, err := q.r.Read(p)
+	q.n += int64(n)
+	if q.left >= 0 && q.n > q.left {
+		return n, errQuota
+	}
+	return n, err
+}
+
+// saveStream stores a backup file, which may be far larger than other
+// objects: it is written to disk as it arrives and kept only when complete.
+func (s *Server) saveStream(w http.ResponseWriter, r *http.Request, be *backend.Local, repo string, h backend.Handle) {
+	left := int64(-1)
+	if s.quota > 0 {
+		left = s.quota - s.repoSize(repo)
+		if r.ContentLength > 0 && r.ContentLength > left {
+			http.Error(w, errQuota.Error(), http.StatusInsufficientStorage)
+			return
+		}
+	}
+	qr := &quotaReader{r: r.Body, left: left}
+	if err := be.SaveStream(r.Context(), h, qr); err != nil {
+		switch {
+		case errors.Is(err, errQuota):
+			http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		case strings.Contains(err.Error(), "already exists"):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		default:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	s.addSize(repo, qr.n)
+	w.WriteHeader(http.StatusOK)
 }
