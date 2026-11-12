@@ -10,8 +10,10 @@ if [ -d /run/systemd/system ]; then
 fi
 if [ ! -e /etc/herakles/herakles.yaml ]; then
   echo "Herakles is installed. Next steps:"
-  echo "  herakles tray --open        desktop: tray icon + interface (per user)"
-  echo "  sudo herakles tui           server: set up /etc/herakles/herakles.yaml"
-  echo "  sudo systemctl enable --now herakles   then run scheduled backups as a service"
+  echo "  sudo herakles daemon desktop on   desktop: backups run as a root service (whole disks,"
+  echo "                                    all files); open them from the \"Herakles\" menu entry"
+  echo "  herakles tray --open              desktop, only your own files: runs as your user"
+  echo "  sudo herakles tui                 server: set up /etc/herakles/herakles.yaml, then"
+  echo "  sudo systemctl enable --now herakles"
 fi
 exit 0

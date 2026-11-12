@@ -198,7 +198,7 @@ func (a *App) daemonCmd() *cobra.Command {
 		a.printf("%s\n", msg)
 		return nil
 	}
-	cmd.AddCommand(run, status, trigger, cancel, reload, logs,
+	cmd.AddCommand(run, status, trigger, cancel, reload, logs, a.daemonDesktopCmd(),
 		svc("install", "Install the daemon as a system service (systemd / Windows service)"),
 		svc("uninstall", "Remove the system service"),
 		svc("start", "Start the system service"),
@@ -239,15 +239,19 @@ func (a *App) runDaemon(ctx context.Context) error {
 			return fmt.Errorf("repository %s has no non-interactive password source; the daemon cannot prompt (set password_file, password_env, password_command or key_file)", rc.Name)
 		}
 	}
-	d, closer, err := a.newDaemon(ctx, nil)
+	share := &desktopShare{a: a, ctx: ctx}
+	d, closer, err := a.newDaemon(ctx, share.update)
 	if err != nil {
 		return err
 	}
 	defer closer.Close()
+	share.d = d
+	if err := d.Listen(); err != nil {
+		return err
+	}
+	share.update(a.cfg)
+	defer share.close()
 	if a.cfg.Web.Listen != "" {
-		if err := d.Listen(); err != nil {
-			return err
-		}
 		// The listen address may not exist yet at boot (e.g. a Docker
 		// bridge address), so keep trying instead of failing the daemon.
 		go func() {

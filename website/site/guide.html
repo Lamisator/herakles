@@ -37,7 +37,7 @@
     <li><a href="#schedules">Schedules</a></li>
     <li><a href="#retention">Retention</a></li>
     <li><a href="#background">Running in the background</a>
-      <ol><li><a href="#tray">Tray icon</a></li><li><a href="#service">System service</a></li><li><a href="#daemon-control">Controlling the daemon</a></li></ol></li>
+      <ol><li><a href="#tray">Tray icon</a></li><li><a href="#desktop-service">Desktop with the system service</a></li><li><a href="#service">System service</a></li><li><a href="#daemon-control">Controlling the daemon</a></li></ol></li>
     <li><a href="#restore">Finding and restoring</a></li>
     <li><a href="#disks">Disks and partitions</a></li>
     <li><a href="#server">Repository server</a>
@@ -104,7 +104,7 @@ Server = https://herakles.kloeck-it.de/arch/$arch
 curl -fsSL https://herakles.kloeck-it.de/herakles.asc | sudo pacman-key --add -
 sudo pacman-key --lsign-key 1035012D5247A80FD7988DFDE64EFE5644EE8226
 sudo pacman -Sy herakles</pre>
-<p>The package installs <code>/usr/bin/herakles</code>, a menu entry (“Herakles”), shell completions for bash, zsh and fish, and the system service <code>herakles.service</code>, which is <em>not</em> enabled: set up <code>/etc/herakles/herakles.yaml</code> first (for example with <code>sudo herakles tui</code>), then run <code>sudo systemctl enable --now herakles</code>. On a desktop, use the tray instead (<code>herakles tray --open</code>, autostart from its menu). Package updates restart a running service. Removing the package stops the service; configuration and repositories are kept.</p>
+<p>The package installs <code>/usr/bin/herakles</code>, a menu entry (“Herakles”), shell completions for bash, zsh and fish, and the system service <code>herakles.service</code>, which is <em>not</em> enabled. On a desktop, run <code>sudo herakles daemon desktop on</code> and open Herakles from the menu: backups then run as root in the service, so they can include whole disks and system files (<a href="#desktop-service">details</a>). For only your own files, just open Herakles from the menu, or use the tray (<code>herakles tray --open</code>). On a server, set up <code>/etc/herakles/herakles.yaml</code> (for example with <code>sudo herakles tui</code>), then run <code>sudo systemctl enable --now herakles</code>. Package updates restart a running service. Removing the package stops the service; configuration and repositories are kept.</p>
 <h3>Linux (single file)</h3>
 <pre>curl -LO https://herakles.kloeck-it.de/downloads/herakles-linux-amd64   <span class="c"># or -arm64 / -armv7</span>
 curl -LO https://herakles.kloeck-it.de/downloads/SHA256SUMS
@@ -265,7 +265,7 @@ herakles key remove --repo usb-disk &lt;KEY-ID&gt;</pre>
   <li><code>devices</code>: whole disks or partitions as raw images, for example <code>/dev/sda1</code>, <code>/dev/nvme0n1</code>, <code>\\.\C:</code> or <code>\\.\PhysicalDrive0</code>. See <a href="#disks">disks and partitions</a>.</li>
   <li><code>tags</code>: labels added to every snapshot of the job, useful for filtering and for <code>keep_tags</code>.</li>
 </ul>
-<p>Backing up system folders or other users' files needs root (Linux) or administrator rights (Windows); use the system service for that.</p>
+<p>Backing up system folders or other users' files needs root (Linux) or administrator rights (Windows); use the system service for that. On a Linux desktop, <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> lets you set it up from the normal Herakles window.</p>
 <h3 id="excludes">Exclusions</h3>
 <table>
 <tr><th>Option</th><th>Example</th><th>Effect</th></tr>
@@ -347,7 +347,7 @@ herakles forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --dry-run</pre>
 <tr><td>Runs as</td><td>you</td><td>root / LocalSystem (or your user with <code>--user</code>)</td></tr>
 <tr><td>Passwords</td><td>can ask in the window</td><td>needs a stored password source</td></tr>
 <tr><td>Interface</td><td>tray icon and desktop window included</td><td>use <code>herakles gui</code>, <code>tui</code> or <code>daemon status</code></td></tr>
-<tr><td>Best for</td><td>laptops and desktops</td><td>servers and system-wide backups</td></tr>
+<tr><td>Best for</td><td>your own files on a laptop or desktop</td><td>servers, and desktops that back up whole disks or system files (<a href="#desktop-service">from the desktop</a>)</td></tr>
 </table>
 
 <h3 id="tray">Tray icon</h3>
@@ -361,6 +361,14 @@ herakles tray autostart on     <span class="c"># start at every login (off / no 
   <li><strong>Windows:</strong> the console window closes by itself when the tray starts at login or from Explorer.</li>
   <li>If there is no desktop at all, <code>herakles tray</code> keeps running as daemon plus GUI and prints the address of the window.</li>
 </ul>
+
+<h3 id="desktop-service">Desktop with the system service</h3>
+<p>The tray runs as you, so it can only read your own files. For whole disks and partitions, system files or other users' homes, the backups have to run as root. Let the system service do them and keep using Herakles from your desktop:</p>
+<pre>sudo herakles daemon desktop on            <span class="c"># share the service with you; enables and starts it</span>
+sudo herakles daemon desktop on --user alice
+sudo herakles daemon desktop off           <span class="c"># stop sharing; no argument lists the users</span></pre>
+<p>Your <strong>Herakles</strong> menu entry and the tray icon (also with autostart) then open the service's window instead of running Herakles as you. The icon shows the service's status; <strong>Hide icon</strong> only removes the icon, the backups keep running, also when nobody is logged in. The setting is <code>gui.users</code> in <code>/etc/herakles/herakles.yaml</code>; only the users listed there can open the window.</p>
+<p>Shared users get full control over the service, restores to any folder included: only add people who may be root on this computer. Jobs in your own configuration do not run in this mode; set them up again in the service's window.</p>
 
 <h3 id="service">System service</h3>
 <h4>Linux (systemd)</h4>
@@ -430,6 +438,7 @@ herakles dump latest:/home/alex/projects --tar &gt; projects.tar</pre>
 
 <h2 id="disks">Disks and partitions</h2>
 <p>Herakles can image whole devices block by block. Unused, zeroed areas deduplicate and compress to almost nothing, and later images only store changed blocks.</p>
+<p>Reading a device needs root (Linux) or administrator rights (Windows). On a Linux desktop, run <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> once: the Herakles window then belongs to the system service, and disk backups set up there just work.</p>
 <pre>sudo herakles backup --repo offsite --device /dev/sda1              <span class="c"># ad hoc</span>
 <span class="c"># or in a job:  devices: [/dev/nvme0n1]</span>
 
@@ -847,6 +856,7 @@ daemon:
 gui:
   listen: 127.0.0.1:7478
   open_browser: true
+  # users: [alice]             # system service: share the window ('daemon desktop')
 
 tray:
   autostart: false             # start 'herakles tray' at login

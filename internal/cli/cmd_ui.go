@@ -26,9 +26,18 @@ func (a *App) guiCmd() *cobra.Command {
 		Short: "Graphical desktop interface (opens in an app window / browser)",
 		Long: `Start the graphical interface. It is served locally (127.0.0.1 only,
 protected by a random session token) and opened in a Chromium/Edge app window
-or the default browser. Works on Linux and Windows without extra runtime.`,
+or the default browser. Works on Linux and Windows without extra runtime.
+
+If the system service is shared with you ('sudo herakles daemon desktop on'),
+this opens the service's window instead.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if listen == "" && !noBrowser {
+				// The system service is shared with this user: open it.
+				if ok, err := openShared(); ok {
+					return err
+				}
+			}
 			if listen == "" {
 				listen = a.cfg.GUI.Listen
 			}

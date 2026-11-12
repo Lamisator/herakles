@@ -223,7 +223,21 @@ It is applied whenever the configuration is saved, from the GUI (checkbox under 
 * Unlike the system service, it does not need a stored password: a repository without a password source shows as locked until you unlock it in the GUI; scheduled backups then use the password until you quit.
 * Linux: works with every desktop that supports StatusNotifierItem tray icons (KDE Plasma, Xfce, Cinnamon, MATE, LXQt, Budgie, waybar, …). On GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. If the panel starts after Herakles, the icon appears as soon as it is ready. Without a desktop session, it keeps running as daemon + GUI and prints the GUI URL.
 * Windows: autostart uses `HKCU\…\CurrentVersion\Run`; the console window closes when it is started from Explorer or at login.
-* Run either the tray or the daemon service, not both: they share the control port.
+* Run either the tray or the daemon service, not both: they share the control port. To use the service from your desktop, see below.
+
+### Desktop with the system service: `herakles daemon desktop`
+
+The tray runs as your user, so it can only read your own files. To back up whole disks and partitions, system files or other users' homes, let the system service (running as root) do the backups and use it from your desktop:
+
+```sh
+sudo herakles daemon desktop on            # shares the service with the user who ran sudo, enables + starts it
+sudo herakles daemon desktop on --user alice
+sudo herakles daemon desktop off           # stop sharing; no argument lists the users
+```
+
+This adds the user to `gui.users` in `/etc/herakles/herakles.yaml`. The service then serves the GUI on 127.0.0.1 and writes `/run/herakles/desktop/<uid>.json` for each listed user, readable only by that user. Their **Herakles** menu entry (`herakles gui`) and tray icon (`herakles tray`, also with autostart) find it and open the service's window instead of running Herakles as that user. The tray icon shows the service's status; its menu entry **Hide icon** only removes the icon. Backups run also when nobody is logged in. The window opens with a one-time login link, so the session token never appears on a command line.
+
+Shared users get full control over the service, restores to any path included: only add people who may be root on this machine. Jobs in the user's own configuration do not run in this mode; set them up again in the service's window.
 
 ### Daemon
 
@@ -365,6 +379,7 @@ The suite covers:
 * CLI end‑to‑end workflows, the TUI (simulated terminal) and the GUI API.
 * Docker: discovery, data sets, database detection, dumps and loads against a fake docker CLI; per-project backup, restore in dumps and files mode, rollback, fresh-host restore; plus a manual integration run against real Postgres, MariaDB and MongoDB containers.
 * Web mode: setup link, password and passkey logins, throttling, roles, secret redaction, Host/CSRF checks; a Playwright run with a virtual authenticator.
+* Desktop sharing of the system service: share file, status, one-time login tickets.
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 
 ## Current limitations

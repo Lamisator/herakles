@@ -1,5 +1,6 @@
-# Installed by the herakles package. Configure /etc/herakles/herakles.yaml
-# first (e.g. with `sudo herakles tui` or the web interface), then:
+# Installed by the herakles package. Desktop: `sudo herakles daemon desktop on`
+# sets it up and opens it from your "Herakles" menu entry. Server: configure
+# /etc/herakles/herakles.yaml (e.g. `sudo herakles tui`), then:
 #   sudo systemctl enable --now herakles
 [Unit]
 Description=Herakles backup daemon: runs scheduled, deduplicated and encrypted backups.
@@ -15,6 +16,9 @@ Restart=always
 RestartSec=120
 EnvironmentFile=-/etc/default/herakles
 EnvironmentFile=-/etc/sysconfig/herakles
+# /run/herakles/desktop: the GUI shared with gui.users ('herakles daemon desktop')
+RuntimeDirectory=herakles
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target

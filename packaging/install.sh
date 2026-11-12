@@ -59,5 +59,7 @@ else
 fi
 
 say "Done: $(herakles version 2>/dev/null || echo herakles)"
-echo "Desktop: start \"Herakles\" from the menu or run 'herakles tray --open'."
+echo "Desktop: 'sudo herakles daemon desktop on', then start \"Herakles\" from the menu. Backups run"
+echo "         in the system service (as root: whole disks, all files), also without a login."
+echo "         Only your own files: start \"Herakles\" from the menu without that step."
 echo "Server:  'sudo herakles tui' to set up /etc/herakles/herakles.yaml, then 'sudo systemctl enable --now herakles'."

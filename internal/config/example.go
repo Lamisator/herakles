@@ -146,6 +146,11 @@ daemon:
 gui:
   listen: 127.0.0.1:7478
   open_browser: true
+  # System service only (Linux, running as root): share the GUI with these
+  # local users. Their tray icon and "Herakles" menu entry open the service,
+  # which can back up whole disks and system files. They get full control
+  # over it, restores included. Set up with 'sudo herakles daemon desktop on'.
+  # users: [alice]
 
 # Web interface with accounts (passwords and passkeys), served by the daemon.
 # There is no public sign-up: the first administrator is created with a

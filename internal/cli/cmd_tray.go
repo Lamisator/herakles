@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -108,6 +110,9 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 	tray.DetachConsole()
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+	if sh, err := daemon.SharedDesktop(); err == nil {
+		return a.runServiceTray(ctx, sh, openNow)
+	}
 	d, closer, err := a.newDaemon(ctx, func(c *config.Config) { tray.ApplyLogged(c, a.eng.Log) })
 	if err != nil {
 		return err
@@ -178,4 +183,61 @@ func (a *App) runningGUI() string {
 		return ""
 	}
 	return url
+}
+
+// trayPIDPath marks a running tray of the system service (one per user).
+func trayPIDPath(a *App) string { return filepath.Join(a.cfg.GetStateDir(), "tray.pid") }
+
+// runServiceTray shows the tray icon for the system service shared with this
+// user (gui.users): backups run in the service, the icon shows its status
+// and opens its window.
+func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openNow bool) error {
+	open := func() {
+		u, err := sh.OpenURL()
+		if err == nil {
+			err = openWindow(u)
+		}
+		if err != nil {
+			fmt.Fprintf(a.err, "cannot open the Herakles window: %v\n", err)
+		}
+	}
+	pidFile := trayPIDPath(a)
+	if b, err := os.ReadFile(pidFile); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid != os.Getpid() && processAlive(pid) {
+			open()
+			return nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(pidFile), 0o700); err == nil {
+		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+		defer os.Remove(pidFile)
+	}
+	if len(a.cfg.Jobs) > 0 {
+		fmt.Fprintf(a.err, "note: the jobs in %s do not run; the Herakles system service runs the backups\n", a.cfg.Path())
+	}
+	if openNow {
+		open()
+	}
+	status := func() tray.Status {
+		st, err := sh.Status()
+		if err != nil {
+			return tray.Status{State: tray.Failed, Line: "System service not reachable"}
+		}
+		return tray.Summarize(*st, nil, time.Now())
+	}
+	err := tray.Run(ctx, tray.Options{Status: status, Open: open, Quit: func() {}, QuitLabel: "Hide icon", QuitHint: "Remove the tray icon; backups keep running in the system service",
+		Warn: func(msg string) { fmt.Fprintln(a.err, "warning:", msg) }})
+	if err != nil {
+		if !openNow {
+			open()
+		}
+		return nil
+	}
+	return nil
+}
+
+// processAlive reports whether pid runs (Unix; elsewhere always false).
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	return err == nil && p.Signal(syscall.Signal(0)) == nil
 }

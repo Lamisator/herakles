@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -54,6 +55,9 @@ type Options struct {
 	Web *WebOptions
 	// TLSCert and TLSKey make the web mode serve HTTPS itself.
 	TLSCert, TLSKey string
+	// Service marks the GUI of the system service, shared with the local
+	// users in gui.users (no tray of its own, see 'herakles daemon desktop').
+	Service bool
 }
 
 // Server is the GUI backend.
@@ -65,6 +69,10 @@ type Server struct {
 	version string
 	ctx     context.Context
 	web     *webAuth
+	service bool
+
+	ticketMu sync.Mutex
+	tickets  map[string]time.Time
 }
 
 // NewServer creates the GUI backend.
@@ -86,7 +94,7 @@ func newServer(ctx context.Context, eng *engine.Engine, opts Options) (*Server, 
 		runner = daemon.NewRunner(ctx, eng, 2)
 	}
 	eng.Prompt = nil
-	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx}
+	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx, service: opts.Service}
 	if opts.Web != nil {
 		if opts.Web.Log == nil {
 			opts.Web.Log = eng.Log
@@ -126,7 +134,10 @@ func Run(ctx context.Context, eng *engine.Engine, opts Options) error {
 type Instance struct {
 	// URL opens the GUI; it carries the session token.
 	URL string
-	srv *http.Server
+	// Base is the address without the token, Token the session token
+	// (local mode only).
+	Base, Token string
+	srv         *http.Server
 }
 
 // Shutdown stops the server, waiting up to five seconds for requests.
@@ -183,7 +194,8 @@ func Start(ctx context.Context, eng *engine.Engine, opts Options) (*Instance, er
 	}
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
-	return &Instance{URL: fmt.Sprintf("http://%s/?token=%s", ln.Addr().String(), s.token), srv: srv}, nil
+	base := "http://" + ln.Addr().String()
+	return &Instance{URL: base + "/?token=" + s.token, Base: base, Token: s.token, srv: srv}, nil
 }
 
 // OpenWindow prefers a chromeless Chromium/Edge "app" window and falls back
@@ -310,6 +322,7 @@ func (s *Server) Handler() http.Handler {
 		s.web.routes(mux)
 		return s.web.guard(mux)
 	}
+	mux.HandleFunc("POST /api/ticket", s.ticket)
 	return s.guard(mux)
 }
 
@@ -333,6 +346,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		ok := false
+		if t := r.URL.Query().Get("ticket"); t != "" && r.URL.Path == "/" {
+			if s.useTicket(t) {
+				http.SetCookie(w, &http.Cookie{Name: "herakles_session", Value: s.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+				http.Redirect(w, r, "/", http.StatusFound)
+				return
+			}
+		}
 		if t := r.URL.Query().Get("token"); t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(s.token)) == 1 {
 			http.SetCookie(w, &http.Cookie{Name: "herakles_session", Value: s.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 			if r.URL.Path == "/" {
@@ -366,12 +386,45 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	})
 }
 
+// ticket hands out a one-time login for opening a browser window: the URL
+// then carries a code that is useless once used or after a minute, not the
+// session token, so it does not leak through the browser's command line.
+func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
+	b := make([]byte, 24)
+	_, _ = rand.Read(b)
+	t := hex.EncodeToString(b)
+	s.ticketMu.Lock()
+	if s.tickets == nil {
+		s.tickets = map[string]time.Time{}
+	}
+	now := time.Now()
+	for k, exp := range s.tickets {
+		if now.After(exp) {
+			delete(s.tickets, k)
+		}
+	}
+	s.tickets[t] = now.Add(time.Minute)
+	s.ticketMu.Unlock()
+	writeJSON(w, 200, map[string]string{"ticket": t})
+}
+
+func (s *Server) useTicket(t string) bool {
+	s.ticketMu.Lock()
+	defer s.ticketMu.Unlock()
+	exp, ok := s.tickets[t]
+	delete(s.tickets, t)
+	return ok && time.Now().Before(exp)
+}
+
 func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 	host, _ := os.Hostname()
 	out := map[string]any{"version": s.version, "config_path": s.eng.Config().Path(), "hostname": host, "os": runtime.GOOS, "mode": "local"}
 	if u := userOf(r); u != nil {
 		out["mode"] = "web"
 		out["user"] = viewOf(u)
+	}
+	if s.service {
+		out["service"] = map[string]any{"users": nonNil(s.eng.Config().GUI.Users)}
 	}
 	if cl, err := daemon.NewClient(s.eng.Config()); err == nil {
 		if st, err := cl.Status(); err == nil {
@@ -386,7 +439,9 @@ func (s *Server) saveConfig(c *config.Config) error {
 		return err
 	}
 	s.eng.SetConfig(c)
-	tray.ApplyLogged(c, s.eng.Log)
+	if !s.service {
+		tray.ApplyLogged(c, s.eng.Log)
+	}
 	if cl, err := daemon.NewClient(c); err == nil {
 		_ = cl.Reload()
 	}

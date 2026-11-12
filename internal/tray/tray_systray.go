@@ -34,7 +34,7 @@ func run(ctx context.Context, opts Options) error {
 		systray.AddSeparator()
 		open := systray.AddMenuItem("Open Herakles", "Open the Herakles window")
 		systray.AddSeparator()
-		exit := systray.AddMenuItem("Quit Herakles", "Stop scheduled backups and quit")
+		exit := systray.AddMenuItem(opts.QuitLabel, opts.QuitHint)
 
 		last := Status{State: -1}
 		update := func() {

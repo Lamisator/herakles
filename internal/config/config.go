@@ -274,10 +274,15 @@ func (d Daemon) IsZero() bool { return d == Daemon{} }
 type GUI struct {
 	Listen      string `yaml:"listen,omitempty" json:"listen,omitempty"`
 	OpenBrowser *bool  `yaml:"open_browser,omitempty" json:"open_browser,omitempty"`
+	// Users are local accounts the system service (running as root) shares
+	// its GUI with: their tray icon and "Herakles" menu entry open the
+	// service instead of running Herakles as that user. They get full
+	// control over the service, restores included (Linux).
+	Users []string `yaml:"users,omitempty" json:"users,omitempty"`
 }
 
 // IsZero lets yaml omit empty sections.
-func (g GUI) IsZero() bool { return g.Listen == "" && g.OpenBrowser == nil }
+func (g GUI) IsZero() bool { return g.Listen == "" && g.OpenBrowser == nil && len(g.Users) == 0 }
 
 // Tray configures the desktop tray mode ('herakles tray').
 type Tray struct {

@@ -43,8 +43,10 @@ type Options struct {
 	Interval time.Duration
 	// Open is called by "Open Herakles" and, where supported, a left click.
 	Open func()
-	// Quit is called by "Quit Herakles" before the tray goes away.
+	// Quit is called by the quit entry before the tray goes away.
 	Quit func()
+	// QuitLabel and QuitHint name the quit entry (default "Quit Herakles").
+	QuitLabel, QuitHint string
 	// HostWait is how long to wait for the desktop's tray host before
 	// calling Warn (default 30s); the icon still appears if one starts later.
 	HostWait time.Duration
@@ -59,6 +61,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if opts.HostWait <= 0 {
 		opts.HostWait = 30 * time.Second
+	}
+	if opts.QuitLabel == "" {
+		opts.QuitLabel, opts.QuitHint = "Quit Herakles", "Stop scheduled backups and quit"
 	}
 	if opts.Status == nil {
 		opts.Status = func() Status { return Status{Line: "Running"} }

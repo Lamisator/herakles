@@ -183,14 +183,14 @@ views.dashboard = async main => {
         run ? [progressBar(run.progress), h('div', { class: 'meta' }, run.state === 'queued' ? 'queued…' : progressText(run.progress)),
           run.progress && run.progress.current ? h('div', { class: 'meta mono' }, run.progress.current) : null] : null,
         h('div', { class: 'actions' },
-          run ? h('button', { class: 'danger', onclick: async () => { await api('POST', '/api/runs/' + run.id + '/cancel'); toast('Cancelling ' + j.name); } }, 'Cancel') : [
-            h('button', { class: 'primary', onclick: () => runJob(j.name, 'auto') }, 'Back up now'),
-            h('button', { onclick: () => runJob(j.name, 'full') }, 'Full'),
-            h('button', { onclick: () => runJob(j.name, 'incremental') }, 'Incremental'),
-            h('button', { onclick: () => runJob(j.name, 'differential') }, 'Differential')],
+          run ? h('button', { class: 'danger', title: 'Stop this backup', onclick: async () => { await api('POST', '/api/runs/' + run.id + '/cancel'); toast('Cancelling ' + j.name); } }, 'Cancel') : [
+            h('button', { class: 'primary', title: 'Back up now: full when one is due (full_interval), otherwise incremental', onclick: () => runJob(j.name, 'auto') }, 'Back up now'),
+            h('button', { title: 'Save everything again, independent of earlier backups', onclick: () => runJob(j.name, 'full') }, 'Full'),
+            h('button', { title: 'Save only what changed since the last backup (fastest)', onclick: () => runJob(j.name, 'incremental') }, 'Incremental'),
+            h('button', { title: 'Save what changed since the last full backup', onclick: () => runJob(j.name, 'differential') }, 'Differential')],
           h('span', { class: 'spacer' }),
-          !j.docker && last && last.snapshot ? h('button', { class: 'small', onclick: () => openExplorer({ repo: j.repository, snapshot: last.snapshot, job: j.name }) }, 'Browse') : null,
-          h('button', { class: 'small', onclick: () => editJob(j.name) }, 'Edit'))));
+          !j.docker && last && last.snapshot ? h('button', { class: 'small', title: 'Look through the latest backup; download or restore files', onclick: () => openExplorer({ repo: j.repository, snapshot: last.snapshot, job: j.name }) }, 'Browse') : null,
+          h('button', { class: 'small', title: 'Change what is backed up, where to, when and how long it is kept', onclick: () => editJob(j.name) }, 'Edit'))));
     }
     clear(activity);
     const rows = [...runs.active, ...runs.recent];
@@ -338,8 +338,8 @@ views.snapshots = async main => {
   const groupSel = h('select', { style: 'width:auto', onchange: e => { pref.group = e.target.value; keep(); render(); } },
     [['none', 'No grouping'], ['type', 'Backup type'], ['job', 'Job'], ['kind', 'Content'], ['day', 'Day'], ['host', 'System']]
       .map(([v, t]) => h('option', { value: v, selected: pref.group === v }, t)));
-  const diffBtn = h('button', { disabled: true, onclick: () => diffSelected() }, 'Compare selected');
-  const forgetBtn = h('button', { class: 'danger', disabled: true, onclick: () => forgetSelected() }, 'Forget selected');
+  const diffBtn = h('button', { title: 'Show what changed between two selected snapshots', disabled: true, onclick: () => diffSelected() }, 'Compare selected');
+  const forgetBtn = h('button', { class: 'danger', title: 'Delete the selected snapshots (space is freed by Prune)', disabled: true, onclick: () => forgetSelected() }, 'Forget selected');
   const stats = h('div', { class: 'stat-strip' });
   const setHead = h('div');
   const listBar = h('div', { class: 'toolbar' }, typeBox, h('label', { class: 'inline' }, 'Group by'), groupSel, h('span', { class: 'spacer' }), diffBtn, forgetBtn);
@@ -347,7 +347,7 @@ views.snapshots = async main => {
   main.append(
     h('div', { class: 'toolbar' }, modeBox, h('label', { class: 'inline' }, icon('repos'), 'Repository'), sel,
       h('label', { class: 'inline' }, icon('systems'), 'System'), hostSel, filter, h('span', { class: 'spacer' }),
-      h('button', { onclick: () => load() }, 'Reload')),
+      h('button', { title: 'Read the snapshot list again', onclick: () => load() }, 'Reload')),
     stats, setHead, listBar, tableBox);
   let snaps = [];
   const picked = new Set();
@@ -379,8 +379,8 @@ views.snapshots = async main => {
   const overview = () => !state.snapSet && !state.snapAll;
   const renderMode = () => {
     clear(modeBox).append(
-      h('button', { class: overview() || state.snapSet ? 'on' : '', onclick: () => { state.snapAll = false; state.snapSet = null; renderTypes(); render(); } }, icon('dashboard'), 'Backups'),
-      h('button', { class: state.snapAll && !state.snapSet ? 'on' : '', onclick: () => { state.snapAll = true; state.snapSet = null; renderTypes(); render(); } }, icon('logs'), 'All snapshots'));
+      h('button', { title: 'One card per backed-up item', class: overview() || state.snapSet ? 'on' : '', onclick: () => { state.snapAll = false; state.snapSet = null; renderTypes(); render(); } }, icon('dashboard'), 'Backups'),
+      h('button', { title: 'Every snapshot in one list', class: state.snapAll && !state.snapSet ? 'on' : '', onclick: () => { state.snapAll = true; state.snapSet = null; renderTypes(); render(); } }, icon('logs'), 'All snapshots'));
   };
   const openSet = key => { state.snapSet = key; picked.clear(); updateSel(); renderTypes(); render(); main.scrollTop = 0; };
 
@@ -437,9 +437,9 @@ views.snapshots = async main => {
       h('div', { class: 'sys-kinds' }, SNAP_TYPES.filter(([t]) => counts[t]).map(([t, label]) => h('span', { class: 'chip type-' + t }, icon(t), counts[t] + ' ' + label.toLowerCase())),
         h('div', { class: 'set-paths' }, contents(l))),
       h('div', { class: 'sys-repos set-actions' },
-        h('button', { class: 'small', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: l }) }, 'Browse'),
-        h('button', { class: 'small', onclick: () => restoreDlg(state.snapRepo, l, ['/']) }, 'Restore'),
-        h('button', { class: 'small', onclick: () => downloadDlg(state.snapRepo, l, ['/']) }, 'Download'),
+        h('button', { class: 'small', title: 'Look through the latest backup', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: l }) }, 'Browse'),
+        h('button', { class: 'small', title: 'Put the latest backup back', onclick: () => restoreDlg(state.snapRepo, l, ['/']) }, 'Restore'),
+        h('button', { class: 'small', title: 'Download the latest backup as an archive', onclick: () => downloadDlg(state.snapRepo, l, ['/']) }, 'Download'),
         h('span', { class: 'muted small' }, 'latest')));
   };
 
@@ -451,7 +451,7 @@ views.snapshots = async main => {
     const l = list.reduce((a, s) => !a || s.time > a.time ? s : a, null);
     const k = snapKind(l);
     setHead.append(h('div', { class: 'set-head' },
-      h('button', { onclick: () => { state.snapSet = null; renderTypes(); render(); } }, icon('back'), 'All backups'),
+      h('button', { title: 'Back to the overview', onclick: () => { state.snapSet = null; renderTypes(); render(); } }, icon('back'), 'All backups'),
       h('span', { class: 'sys-ico small kind-' + k.key }, icon(k.icon)),
       h('div', {}, h('b', {}, setName(l)), h('div', { class: 'muted small' }, [k.label, l.job ? 'job ' + l.job : '', l.hostname].filter(Boolean).join(' · ')))));
   };
@@ -486,7 +486,7 @@ views.snapshots = async main => {
     for (const [t, label] of [['', 'All types'], ...SNAP_TYPES]) {
       const n = count(t);
       if (t && !n && pref.type !== t) continue;
-      typeBox.append(h('button', { class: (pref.type === t ? 'on ' : '') + (t ? 'type-' + t : ''), onclick: () => { pref.type = t; keep(); renderTypes(); render(); } },
+      typeBox.append(h('button', { title: t ? 'Show only ' + label.toLowerCase() + ' backups' : 'Show all backup types', class: (pref.type === t ? 'on ' : '') + (t ? 'type-' + t : ''), onclick: () => { pref.type = t; keep(); renderTypes(); render(); } },
         t ? icon(t) : icon('snapshots'), label, h('span', { class: 'n' }, String(n))));
     }
   };
@@ -547,7 +547,7 @@ views.snapshots = async main => {
           s.summary.bytes_stored ? Math.max(0.1, s.summary.bytes_stored / s.summary.total_bytes * 100).toFixed(1) + ' % of size' : 'nothing new') : null) : '-'),
       h('td', { class: 'paths-cell' }, contents(s)),
       h('td', { class: 'nowrap actions-cell' },
-        h('button', { class: 'small', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: s }) }, 'Browse'),
+        h('button', { class: 'small', title: 'Look through this snapshot; download or restore files', onclick: () => openExplorer({ repo: state.snapRepo, snapshot: s }) }, 'Browse'),
         iconBtn('download', 'Download the whole snapshot', () => downloadDlg(state.snapRepo, s, ['/'])),
         iconBtn('restore', 'Restore the whole snapshot', () => restoreDlg(state.snapRepo, s, ['/'])),
         iconBtn('trash', 'Forget this snapshot', () => forget([s]), 'danger')));
@@ -658,8 +658,8 @@ views.jobs = async main => {
       h('td', { class: 'wrap' }, [...(j.paths || []), ...(j.devices || [])].join(', ')),
       h('td', { class: 'wrap' }, (j.schedule || []).map(s => h('span', { class: 'chip' }, s.cron + ' · ' + (s.type || 'auto')))),
       h('td', { class: 'normal' }, retentionText(j.retention)),
-      h('td', {}, h('button', { class: 'small', onclick: () => editJob(j.name) }, 'Edit'), ' ',
-        h('button', { class: 'small danger', onclick: async () => {
+      h('td', {}, h('button', { class: 'small', title: 'Change this job', onclick: () => editJob(j.name) }, 'Edit'), ' ',
+        h('button', { class: 'small danger', title: 'Remove this job; its backups are kept', onclick: async () => {
           if (!await confirmDlg('Delete job', 'Delete job ' + j.name + '? Existing snapshots are kept.', true)) return;
           const c = await loadConfig(); c.jobs = c.jobs.filter(x => x.name !== j.name); await saveConfig(c); navigate('jobs');
         } }, 'Delete'))))));
@@ -926,13 +926,13 @@ views.repos = async main => {
             const st = s.stats;
             clear(statsBox).append(st.snapshots + ' snapshots · ' + fmtBytes(st.raw_bytes) + ' unique data · ' + fmtBytes(st.stored_bytes) + ' stored (' + (st.stored_bytes ? (st.raw_bytes / st.stored_bytes).toFixed(2) : '-') + 'x compression)');
           } catch (e) { toast(e.message, true); }
-        } }, 'Statistics'),
-        h('button', { onclick: () => initRepo(r) }, 'Initialize'),
-        h('button', { onclick: () => task(r.name, 'check') }, 'Check'),
-        h('button', { onclick: async () => { if (await confirmDlg('Prune', 'Apply all retention policies of jobs using ' + r.name + ' and remove unreferenced data?')) task(r.name, 'prune'); } }, 'Prune'),
+        }, title: 'Show how much data the repository holds' }, 'Statistics'),
+        h('button', { title: 'Set up a new, empty repository at this location', onclick: () => initRepo(r) }, 'Initialize'),
+        h('button', { title: 'Verify that the stored backups are complete and readable', onclick: () => task(r.name, 'check') }, 'Check'),
+        h('button', { title: 'Delete snapshots the retention rules no longer keep and free their space', onclick: async () => { if (await confirmDlg('Prune', 'Apply all retention policies of jobs using ' + r.name + ' and remove unreferenced data?')) task(r.name, 'prune'); } }, 'Prune'),
         h('span', { class: 'spacer' }),
-        h('button', { class: 'small', onclick: () => editRepo(r.name) }, 'Edit'),
-        h('button', { class: 'small danger', onclick: async () => {
+        h('button', { class: 'small', title: 'Change location or password source', onclick: () => editRepo(r.name) }, 'Edit'),
+        h('button', { class: 'small danger', title: 'Remove from the configuration; stored backups are kept', onclick: async () => {
           if (!await confirmDlg('Remove repository', 'Remove ' + r.name + ' from the configuration? Stored backups are NOT deleted.', true)) return;
           const c = await loadConfig(); c.repositories = c.repositories.filter(x => x.name !== r.name);
           try { await saveConfig(c); navigate('repos'); } catch (e) { toast(e.message, true); }
@@ -1058,9 +1058,13 @@ views.settings = async main => {
     } catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
   } });
   main.append(h('h1', {}, 'Configuration'),
-    h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
-      h('label', { class: 'check' }, autostart, 'Start Herakles in the system tray when I log in'),
-      h('div', { class: 'meta' }, 'Runs scheduled backups and this interface in the background (tray.autostart). Use either this or the daemon service.')),
+    state.info && state.info.service
+      ? h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
+        h('div', {}, 'This window belongs to the Herakles system service: it runs as root, so it can back up whole disks and every file, also when nobody is logged in.'),
+        h('div', { class: 'meta' }, 'Shared with: ' + (state.info.service.users.join(', ') || 'nobody') + ' (gui.users). Change with ', h('span', { class: 'mono' }, 'sudo herakles daemon desktop on|off --user NAME'), '.'))
+      : h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
+        h('label', { class: 'check' }, autostart, 'Start Herakles in the system tray when I log in'),
+        h('div', { class: 'meta' }, 'Runs scheduled backups and this interface in the background (tray.autostart). Use either this or the daemon service. To back up whole disks or system files, let the system service run them: ', h('span', { class: 'mono' }, 'sudo herakles daemon desktop on'), '.')),
     h('div', { class: 'sub' }, 'Full YAML configuration (', h('span', { class: 'mono' }, data.path), '). Comments are preserved when saving here. Everything — notifications, daemon and server settings — can be edited.'),
     h('div', { class: 'toolbar' },
       h('button', { class: 'primary', onclick: async () => { try { await api('PUT', '/api/config/yaml', { yaml: ta.value }); toast('Saved and applied'); } catch (e) { toast(e.message, true); } } }, 'Validate & save'),
@@ -1252,7 +1256,7 @@ views.wizard = async main => {
           row('clock', 'Runs', { nightly: 'every night at ' + wz.time + ', full every 7 days', weekly: 'Sundays full, Monday to Saturday incremental, at ' + wz.time, hourly: 'every 4 hours, full every 7 days', manual: 'only when started' }[wz.schedule]),
           row('retention', 'Keeps', { week: '7 daily backups', standard: '7 daily, 4 weekly, 12 monthly', long: '14 daily, 8 weekly, 24 monthly, 5 yearly', all: 'everything' }[wz.keep])),
         check('runNow', 'Start the first backup right away'),
-        state.info && state.info.mode !== 'web' && wz.schedule !== 'manual' && !(cfg.tray && cfg.tray.autostart) ? check('autostart', 'Run scheduled backups in the background: start Herakles in the system tray when I log in') : null];
+        state.info && state.info.mode !== 'web' && !state.info.service && wz.schedule !== 'manual' && !(cfg.tray && cfg.tray.autostart) ? check('autostart', 'Run scheduled backups in the background: start Herakles in the system tray when I log in') : null];
     },
   };
 
@@ -1457,11 +1461,11 @@ views.containers = async main => {
           run ? [h('div', { class: 'meta' }, run.kind === 'restore' ? 'Restoring: ' + (run.message || 'queued…') : (run.state === 'queued' ? 'queued…' : progressText(run.progress))),
             run.kind === 'backup' ? progressBar(run.progress) : h('div', { class: 'progress indet' }, h('div'))] : null,
           h('div', { class: 'actions' },
-            h('button', { class: 'primary', disabled: !!run, onclick: () => dockerBackup(j.job, p.name) }, 'Back up now'),
-            h('button', { disabled: !!run || !p.snapshots, onclick: () => dockerRestore(j.job, p) }, 'Restore…'),
+            h('button', { class: 'primary', title: 'Back up this project now, databases included', disabled: !!run, onclick: () => dockerBackup(j.job, p.name) }, 'Back up now'),
+            h('button', { title: 'Put this project back to the state of a backup', disabled: !!run || !p.snapshots, onclick: () => dockerRestore(j.job, p) }, 'Restore…'),
             h('span', { class: 'spacer' }),
-            h('button', { class: 'small', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapHost = ''; state.snapJob = unit; navigate('snapshots'); } }, 'Snapshots'),
-            h('button', { class: 'small', disabled: !last, onclick: () => openExplorer({ repo: j.repository, snapshot: last.id, job: unit }) }, 'Browse'))));
+            h('button', { class: 'small', title: 'List all backups of this project', disabled: !p.snapshots, onclick: () => { state.snapRepo = j.repository; state.snapHost = ''; state.snapJob = unit; navigate('snapshots'); } }, 'Snapshots'),
+            h('button', { class: 'small', title: 'Look through the latest backup; download or restore files', disabled: !last, onclick: () => openExplorer({ repo: j.repository, snapshot: last.id, job: unit }) }, 'Browse'))));
       }
     }
   };
