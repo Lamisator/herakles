@@ -28,10 +28,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/godbus/dbus/v5"
 	"github.com/lamisator/herakles/internal/accounts"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/daemon"
+
 	"github.com/lamisator/herakles/internal/engine"
 	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/repository"
@@ -226,45 +228,76 @@ func OpenWindow(url string) error {
 	return OpenBrowser(url)
 }
 
-// OpenBrowser opens the GUI in a Chromium/Edge "app" window or the default
-// browser.
+// OpenBrowser opens the GUI in the default browser (on Windows and macOS
+// preferably as a chromeless Edge/Chrome "app" window).
 func OpenBrowser(url string) error {
-	var candidates []string
 	switch runtime.GOOS {
 	case "windows":
 		for _, base := range []string{os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramFiles"), os.Getenv("LocalAppData")} {
-			if base == "" {
-				continue
-			}
-			candidates = append(candidates,
-				filepath.Join(base, `Microsoft\Edge\Application\msedge.exe`),
-				filepath.Join(base, `Google\Chrome\Application\chrome.exe`))
-		}
-	case "darwin":
-		candidates = []string{"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"}
-	default:
-		for _, n := range []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "microsoft-edge", "brave-browser"} {
-			if p, err := exec.LookPath(n); err == nil {
-				candidates = append(candidates, p)
+			for _, c := range []string{`Microsoft\Edge\Application\msedge.exe`, `Google\Chrome\Application\chrome.exe`} {
+				if p := filepath.Join(base, c); base != "" && fileExists(p) && window.Launch(appCommand(p, url)) == nil {
+					return nil
+				}
 			}
 		}
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err != nil {
-			continue
-		}
-		if err := exec.Command(c, "--app="+url, "--window-size=1280,860").Start(); err == nil {
-			return nil
-		}
-	}
-	switch runtime.GOOS {
-	case "windows":
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	case "darwin":
 		return exec.Command("open", url).Start()
-	default:
-		return exec.Command("xdg-open", url).Start()
 	}
+	return openLinuxBrowser(url)
+}
+
+func appCommand(browser, url string) *exec.Cmd {
+	return exec.Command(browser, "--app="+url, "--window-size=1280,860")
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// openLinuxBrowser opens url in the user's default browser: xdg-open, the
+// desktop portal (KDE and GNOME without xdg-utils), then the desktops' own
+// openers and common browsers. Each attempt must not fail right away.
+func openLinuxBrowser(url string) error {
+	var tried []string
+	try := func(name string, args ...string) bool {
+		p, err := exec.LookPath(name)
+		if err != nil {
+			return false
+		}
+		if err := window.Launch(exec.Command(p, append(args, url)...)); err != nil {
+			tried = append(tried, fmt.Sprintf("%s: %v", name, err))
+			return false
+		}
+		return true
+	}
+	if try("xdg-open") {
+		return nil
+	}
+	if err := portalOpenURI(url); err == nil {
+		return nil
+	} else {
+		tried = append(tried, "desktop portal: "+err.Error())
+	}
+	for _, o := range [][]string{{"gio", "open"}, {"kde-open6"}, {"kde-open5"}, {"kde-open"}, {"sensible-browser"}, {"x-www-browser"},
+		{"firefox"}, {"chromium"}, {"chromium-browser"}, {"google-chrome"}, {"google-chrome-stable"}, {"microsoft-edge"}, {"brave-browser"}} {
+		if try(o[0], o[1:]...) {
+			return nil
+		}
+	}
+	if len(tried) == 0 {
+		return errors.New("no web browser found: install xdg-utils or a browser, or open the address yourself")
+	}
+	return fmt.Errorf("no browser could be opened (%s)", strings.Join(tried, "; "))
+}
+
+// portalOpenURI asks the desktop (org.freedesktop.portal.OpenURI) to open
+// url in the default browser.
+func portalOpenURI(url string) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return err
+	}
+	obj := conn.Object("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop")
+	return obj.Call("org.freedesktop.portal.OpenURI.OpenURI", 0, "", url, map[string]dbus.Variant{}).Err
 }
 
 type apiError struct {

@@ -32,6 +32,11 @@ var ErrUnavailable = errors.New("no native window available")
 // libraries, no display) before it counts as open.
 var startWait = 4 * time.Second
 
+// Launch runs cmd and reports an error if it ends with a failure within a
+// few seconds (a browser that is only a stub, missing libraries, no
+// display). A program that keeps running counts as started.
+func Launch(cmd *exec.Cmd) error { return start(cmd) }
+
 // start runs cmd and reports an error if it ends with a failure within
 // startWait. The window process keeps running on its own.
 func start(cmd *exec.Cmd) error {

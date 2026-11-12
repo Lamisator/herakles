@@ -179,6 +179,7 @@ func (a *App) runTray(parent context.Context, openNow bool) (err error) {
 	open := func() {
 		if err := openWindow(inst.URL); err != nil {
 			a.eng.Log.Error("cannot open the GUI window", "err", err, "url", inst.URL)
+			_ = tray.Notify("Herakles window could not open", err.Error())
 		}
 	}
 	if openNow {
@@ -286,6 +287,7 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 		}
 		if err != nil {
 			fmt.Fprintf(a.err, "cannot open the Herakles window: %v\n", err)
+			_ = tray.Notify("Herakles window could not open", err.Error())
 		}
 	}
 	pidFile := trayPIDPath(a)

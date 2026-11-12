@@ -207,7 +207,7 @@ A full‑screen curses‑style interface with five tabs (keys `1`–`5` or `F1`�
 
 ### Desktop GUI — `herakles gui`
 
-The GUI is served only on `127.0.0.1` and protected by a random session token, CSRF and DNS‑rebinding checks. It opens in a **window of its own** without a web browser: WebView2 on Windows (built into Windows 11; the setup installs it elsewhere), WebKitGTK on Linux through the small `herakles-window` helper (`/usr/lib/herakles/`, loads `libwebkit2gtk-4.1` at run time so `herakles` itself stays a static binary). Without those it falls back to a Chromium/Edge app window or the default browser (`HERAKLES_BROWSER=1` forces the browser). The interface is fully embedded in the binary.
+The GUI is served only on `127.0.0.1` and protected by a random session token, CSRF and DNS‑rebinding checks. It opens in a **window of its own** without a web browser: WebView2 on Windows (built into Windows 11; the setup installs it elsewhere), WebKitGTK on Linux through the small `herakles-window` helper (`/usr/lib/herakles/`, loads `libwebkit2gtk-4.1` at run time so `herakles` itself stays a static binary). Without those it falls back to the default browser (Linux: `xdg-open`, the desktop portal, then installed browsers; Windows: an Edge app window) (`HERAKLES_BROWSER=1` forces the browser). The interface is fully embedded in the binary.
 
 * **Dashboard**: job cards with Back up now / Full / Incremental / Differential, live progress, daemon status and next run.
 * **Systems**: one card per backed-up computer (from all repositories) with last backup, freshness dot, snapshot count, jobs and stored size; click it to see that system's snapshots.
