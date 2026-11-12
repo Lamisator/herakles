@@ -8,6 +8,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -131,7 +132,9 @@ func TestTrayMode(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("tray did not stop")
 	}
-	if !strings.Contains(errb.String(), "no tray icon") || !strings.Contains(errb.String(), url) {
+	// Without a D-Bus tray host (Linux) the tray runs without icon. Windows
+	// always has a tray.
+	if runtime.GOOS == "linux" && (!strings.Contains(errb.String(), "no tray icon") || !strings.Contains(errb.String(), url)) {
 		t.Fatalf("expected a no-tray warning with the URL:\n%s", errb.String())
 	}
 	if _, err := os.Stat(urlFile); !os.IsNotExist(err) {
@@ -158,6 +161,9 @@ func (l *lockedBuffer) String() string {
 }
 
 func TestTrayAutostartCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("XDG autostart files; Windows uses the user's Run registry key")
+	}
 	e := newEnv(t)
 	e.setup()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(e.dir, "xdg-config"))

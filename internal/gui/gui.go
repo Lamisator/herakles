@@ -1176,7 +1176,10 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	glob := strings.ContainsAny(q, "*?")
-	base := path.Clean("/" + r.URL.Query().Get("path"))
+	base := r.URL.Query().Get("path")
+	if len(base) < 2 || base[1] != ':' { // Windows paths ("C:\...") stay as they are
+		base = path.Clean("/" + base)
+	}
 	node, err := repo.FindNode(r.Context(), snap.Tree, base)
 	if err != nil || node.Type == repository.NodeDevice {
 		if img, inner, ok, _ := s.imageAt(r, repo, snap, base); ok {

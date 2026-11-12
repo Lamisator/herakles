@@ -110,6 +110,9 @@ func Remainder(job *config.Job, all []docker.Project) (paths, excludes []string)
 
 // globEscape makes a path safe to use as an exclude pattern.
 func globEscape(p string) string {
+	// Separators first: on Windows a backslash is one, and an escaped one
+	// ("C:\\Users") no longer matched after the filter turned it into "/".
+	p = filepath.ToSlash(p)
 	return strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[", "{", "\\{").Replace(p)
 }
 

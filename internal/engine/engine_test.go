@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lamisator/herakles/internal/archiver"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/repository"
@@ -226,5 +227,22 @@ func TestPromptAndWrongPassword(t *testing.T) {
 	e2 := New(e.Config(), nil)
 	if _, err := e2.Open(ctx, rc); err == nil {
 		t.Fatal("wrong password accepted")
+	}
+}
+
+// An escaped path still matches as an exclude pattern; on Windows the
+// separators used to be escaped too, so the repository was backed up into
+// itself.
+func TestGlobEscapeExcludes(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "re[po]*")
+	f, err := archiver.NewFilter([]string{globEscape(dir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Excluded(dir) || !f.Excluded(filepath.Join(dir, "data", "x")) {
+		t.Fatalf("%s not excluded by %s", dir, globEscape(dir))
+	}
+	if f.Excluded(dir + "x") {
+		t.Fatal("neighbour excluded")
 	}
 }
