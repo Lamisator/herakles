@@ -3,13 +3,13 @@ Type=Application
 Name=Herakles
 GenericName=Backup
 Comment=Deduplicated, encrypted backups of files, disks and Docker projects
-Exec=herakles gui
+Exec=herakles tray --open
 Icon=herakles
 Terminal=false
 Categories=Utility;Archiving;System;
 Keywords=backup;restore;snapshot;docker;
-Actions=Tray;
+Actions=Window;
 
-[Desktop Action Tray]
-Name=Start in the system tray
-Exec=herakles tray
+[Desktop Action Window]
+Name=Open the window only (no tray icon)
+Exec=herakles gui

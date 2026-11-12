@@ -98,6 +98,29 @@ as_user() { # as_user NAME command...: run as the desktop user with their HOME
   fi
 }
 
+# start_tray NAME: start the tray icon now in NAME's running desktop session
+# (autostart only takes effect at the next login). It runs as a transient
+# systemd user unit, which has the session's DISPLAY/WAYLAND_DISPLAY.
+start_tray() {
+  rt=/run/user/$(id -u "$1")
+  [ -S "$rt/bus" ] || return 1
+  pgrep -u "$1" -f "herakles tray" >/dev/null 2>&1 && return 0
+  if command -v systemd-run >/dev/null 2>&1 &&
+    as_user "$1" env XDG_RUNTIME_DIR="$rt" DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus" \
+      systemd-run --user --quiet --collect --unit=herakles-tray herakles tray >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+tray_on() { # tray_on NAME: tray at every login, and now if NAME is logged in
+  as_user "$1" herakles tray autostart on >/dev/null || return
+  if start_tray "$1"; then
+    echo "Tray icon: started, and on at every login."
+  else
+    echo "Tray icon: on at login (log in again, or run: herakles tray)."
+  fi
+}
+
 # A desktop is likely if a graphical session type or display manager exists.
 default_mode=server
 if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != root ] && { ls /usr/share/xsessions/*.desktop >/dev/null 2>&1 || ls /usr/share/wayland-sessions/*.desktop >/dev/null 2>&1; }; then
@@ -144,7 +167,7 @@ desktop)
   say "Sharing the system service with $DUSER"
   herakles daemon desktop on --user "$DUSER" >/dev/null
   ask "Show the Herakles icon in the tray after every login of $DUSER? [Y/n]" y
-  if is_yes "$REPLY"; then as_user "$DUSER" herakles tray autostart on >/dev/null && echo "Tray icon: on at login."; fi
+  if is_yes "$REPLY"; then tray_on "$DUSER"; fi
   cat <<EOT
 
 Herakles is ready. As $DUSER, open "Herakles" from the applications menu
@@ -156,7 +179,7 @@ EOT
 user)
   desktop_user
   ask "Start Herakles in the tray after every login of $DUSER? [Y/n]" y
-  if is_yes "$REPLY"; then as_user "$DUSER" herakles tray autostart on >/dev/null && echo "Tray icon: on at login."; fi
+  if is_yes "$REPLY"; then tray_on "$DUSER"; fi
   cat <<EOT
 
 Herakles is ready. As $DUSER, open "Herakles" from the applications menu

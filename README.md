@@ -52,7 +52,7 @@ curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo sh
 
 It ships `/usr/bin/herakles`, a menu entry, shell completions and `herakles.service`. Afterwards the script asks how Herakles will be used and sets it up:
 
-* **Desktop** (default when a graphical session is installed): shares the system service with your user (`herakles daemon desktop on`), optionally turns on the tray icon at login; then open *Herakles* from the menu. Backups run as root, so whole disks and all files work.
+* **Desktop** (default when a graphical session is installed): shares the system service with your user (`herakles daemon desktop on`), optionally turns on the tray icon at login and starts it right away if that user is logged in; then open *Herakles* from the menu (it also brings up the tray icon). Backups run as root, so whole disks and all files work.
 * **Desktop, only your own files**: Herakles runs as your user (tray autostart).
 * **Server**: starts the backup wizard in the terminal (`herakles tui --wizard`), then enables and starts `herakles.service`.
 * **Nothing**: install only and print the next steps.
@@ -248,7 +248,7 @@ sudo herakles daemon desktop on --user alice
 sudo herakles daemon desktop off           # stop sharing; no argument lists the users
 ```
 
-This adds the user to `gui.users` in `/etc/herakles/herakles.yaml`. The service then serves the GUI on 127.0.0.1 and writes `/run/herakles/desktop/<uid>.json` for each listed user, readable only by that user. Their **Herakles** menu entry (`herakles gui`) and tray icon (`herakles tray`, also with autostart) find it and open the service's window instead of running Herakles as that user. The tray icon shows the service's status; its menu entry **Hide icon** only removes the icon. Backups run also when nobody is logged in. The window opens with a one-time login link, so the session token never appears on a command line.
+This adds the user to `gui.users` in `/etc/herakles/herakles.yaml`. The service then serves the GUI on 127.0.0.1 and writes `/run/herakles/desktop/<uid>.json` for each listed user, readable only by that user. Their **Herakles** menu entry (`herakles tray --open`: tray icon plus window; its action *Open the window only* runs `herakles gui`) and tray icon (`herakles tray`, also with autostart) find it and open the service's window instead of running Herakles as that user. The tray icon shows the service's status; its menu entry **Hide icon** only removes the icon. Backups run also when nobody is logged in. The window opens with a one-time login link, so the session token never appears on a command line.
 
 Shared users get full control over the service, restores to any path included: only add people who may be root on this machine. Jobs in the user's own configuration do not run in this mode; set them up again in the service's window.
 
