@@ -168,5 +168,5 @@ func open(names ...string) (uintptr, error) {
 		}
 		last = err
 	}
-	return 0, fmt.Errorf("%s not installed (%v)", names[0], last)
+	return 0, fmt.Errorf("%s not installed: install the herakles-desktop package (%v)", names[0], last)
 }

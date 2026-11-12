@@ -1,0 +1,6 @@
+herakles-desktop installs Herakles together with WebKitGTK, so that the
+Herakles window (/usr/lib/herakles/herakles-window) can show the desktop
+interface without a web browser. It contains no programs of its own.
+
+Open "Herakles" from the applications menu, or run: herakles tray --open
+Guide: https://herakles.kloeck-it.de/guide.html

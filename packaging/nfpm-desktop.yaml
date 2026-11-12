@@ -1,0 +1,44 @@
+# herakles-desktop (deb, rpm, archlinux): pulls in what the Herakles window
+# needs on a desktop, WebKitGTK for herakles-window. Servers install only
+# herakles. Filled in by packaging/build.sh like nfpm.yaml.
+name: herakles-desktop
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+release: 1
+section: admin
+priority: optional
+maintainer: Marius Klöck <herakles@kloeck-it.de>
+vendor: Marius Klöck
+homepage: https://herakles.kloeck-it.de
+license: Proprietary
+description: |-
+  Herakles on the desktop: the Herakles window
+  Installs Herakles with WebKitGTK, so the desktop interface opens in a
+  window of its own instead of the web browser. Servers only need the
+  herakles package.
+contents:
+  - src: packaging/herakles-desktop.txt
+    dst: /usr/share/doc/herakles-desktop/README
+    file_info: {mode: 0644}
+overrides:
+  deb:
+    depends:
+      - herakles (= ${PKG_VERSION}-1)
+      - libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37
+  rpm:
+    depends:
+      - herakles = ${PKG_VERSION}-1
+      # Fedora (webkit2gtk4.1) and openSUSE (libwebkit2gtk-4_1-0) both
+      # provide the library by its soname.
+      - libwebkit2gtk-4.1.so.0()(64bit)
+  archlinux:
+    depends:
+      - herakles=${PKG_VERSION}-1
+      - webkit2gtk-4.1
+rpm:
+  group: Applications/Archiving
+  signature:
+    key_file: ${PKG_SIGN_KEY}
+archlinux:
+  packager: Marius Klöck <herakles@kloeck-it.de>

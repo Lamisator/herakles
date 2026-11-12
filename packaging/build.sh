@@ -31,7 +31,7 @@ if [ ! -x "$CACHE/venv/bin/createrepo_c" ]; then
 fi
 
 rm -rf "$OUT"
-mkdir -p "$OUT"/{apt/pool/main/h/herakles,rpm,arch/x86_64,arch/aarch64,arch/armv7h}
+mkdir -p "$OUT"/{apt/pool/main/h/herakles,apt/pool/main/h/herakles-desktop,rpm,arch/x86_64,arch/aarch64,arch/armv7h}
 gen=$(mktemp -d)
 trap 'rm -rf "$gen"' EXIT
 host=$DIST/herakles-$TAG-linux-amd64
@@ -46,6 +46,16 @@ for a in amd64 arm64 arm7; do
       packaging/nfpm.yaml > "$gen/nfpm.yaml"
     "${NFPM[@]}" package -f "$gen/nfpm.yaml" -p $p -t "$gen/" >/dev/null
   done
+  # herakles-desktop: WebKitGTK for the Herakles window (64-bit only, like
+  # herakles-window itself)
+  if [ $a != arm7 ]; then
+    sed -e "s|\${PKG_ARCH}|$a|; s|\${PKG_VERSION}|$VER|g; s|\${PKG_SIGN_KEY}|$SIGNING_DIR/private.asc|" \
+      packaging/nfpm-desktop.yaml > "$gen/nfpm-desktop.yaml"
+    for p in deb rpm archlinux; do
+      "${NFPM[@]}" package -f "$gen/nfpm-desktop.yaml" -p $p -t "$gen/" >/dev/null
+    done
+    mv "$gen"/herakles-desktop_*.deb "$OUT/apt/pool/main/h/herakles-desktop/"
+  fi
   mv "$gen"/*.deb "$OUT/apt/pool/main/h/herakles/"
   mv "$gen"/*.rpm "$OUT/rpm/"
   mv "$gen"/*.pkg.tar.zst "$OUT/arch/${archdir[$a]}/"
