@@ -19,10 +19,12 @@ import (
 	"github.com/lamisator/herakles/internal/gui"
 	"github.com/lamisator/herakles/internal/sysutil"
 	"github.com/lamisator/herakles/internal/tray"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 func (a *App) trayCmd() *cobra.Command {
 	var openNow bool
+	var after int
 	cmd := &cobra.Command{
 		Use:   "tray",
 		Short: "Run the daemon with the GUI and a system tray icon",
@@ -37,10 +39,16 @@ use it until Herakles quits.
 Starting it a second time opens the window of the running instance.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if after > 0 {
+				waitForExit(after)
+			}
+			update.CleanOld()
 			return a.runTray(cmd.Context(), openNow)
 		},
 	}
 	cmd.Flags().BoolVar(&openNow, "open", false, "open the GUI window right away")
+	cmd.Flags().IntVar(&after, "after", 0, "start once this process has ended (used by updates)")
+	_ = cmd.Flags().MarkHidden("after")
 	autostart := &cobra.Command{
 		Use:   "autostart [on|off]",
 		Short: "Start the tray when you log in (sets tray.autostart)",
@@ -108,6 +116,11 @@ func guiURLPath(a *App) string { return filepath.Join(a.cfg.GetStateDir(), "gui.
 
 func (a *App) runTray(parent context.Context, openNow bool) error {
 	tray.DetachConsole()
+	if lnk, err := tray.EnsureMenuEntry(a.cfg.GetStateDir()); err != nil {
+		a.eng.Log.Warn("no Start menu entry", "err", err)
+	} else if lnk != "" {
+		a.eng.Log.Info("added Herakles to the Start menu", "shortcut", lnk)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	if sh, err := daemon.SharedDesktop(); err == nil {
@@ -129,7 +142,13 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 	for _, name := range a.eng.Locked() {
 		a.eng.Log.Warn("repository needs its password before scheduled backups can run; unlock it in the GUI", "repo", name)
 	}
-	inst, err := gui.Start(ctx, a.eng, gui.Options{Listen: a.cfg.GUI.Listen, Version: Version, Runner: d.Runner, Logs: d.Logs})
+	upd := a.newUpdater(a.cfg, func() bool { return len(d.Status().Active) > 0 }, cancel)
+	opts := gui.Options{Listen: a.cfg.GUI.Listen, Version: Version, Runner: d.Runner, Logs: d.Logs}
+	if upd != nil {
+		go upd.chk.Run(ctx)
+		opts.Update, opts.InstallUpdate = upd.state, upd.install
+	}
+	inst, err := gui.Start(ctx, a.eng, opts)
 	if err != nil {
 		return err
 	}
@@ -154,7 +173,11 @@ func (a *App) runTray(parent context.Context, openNow bool) error {
 	}
 	status := func() tray.Status { return tray.Summarize(d.Status(), a.eng.Locked(), time.Now()) }
 	warn := func(msg string) { a.eng.Log.Warn(msg, "gui", inst.URL) }
-	err = tray.Run(ctx, tray.Options{Status: status, Open: open, Quit: cancel, Warn: warn})
+	topts := tray.Options{Status: status, Open: open, Quit: cancel, Warn: warn}
+	if upd != nil {
+		topts.Update, topts.Install = upd.label, func() { _ = upd.install() }
+	}
+	err = tray.Run(ctx, topts)
 	if err != nil {
 		// No tray available: keep running as a plain daemon with the GUI.
 		fmt.Fprintf(a.err, "warning: no tray icon: %v\nThe daemon keeps running; the GUI is at %s\nPress Ctrl+C to quit.\n", err, inst.URL)
@@ -225,8 +248,18 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 		}
 		return tray.Summarize(*st, nil, time.Now())
 	}
-	err := tray.Run(ctx, tray.Options{Status: status, Open: open, Quit: func() {}, QuitLabel: "Hide icon", QuitHint: "Remove the tray icon; backups keep running in the system service",
-		Warn: func(msg string) { fmt.Fprintln(a.err, "warning:", msg) }})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	topts := tray.Options{Status: status, Open: open, Quit: func() {}, QuitLabel: "Hide icon", QuitHint: "Remove the tray icon; backups keep running in the system service",
+		Warn: func(msg string) { fmt.Fprintln(a.err, "warning:", msg) }}
+	// The update replaces the program the service runs too; the package or
+	// the setup restarts the service.
+	busy := func() bool { st, err := sh.Status(); return err == nil && len(st.Active) > 0 }
+	if upd := a.newUpdater(a.cfg, busy, cancel); upd != nil {
+		go upd.chk.Run(ctx)
+		topts.Update, topts.Install = upd.label, func() { _ = upd.install() }
+	}
+	err := tray.Run(ctx, topts)
 	if err != nil {
 		if !openNow {
 			open()

@@ -35,6 +35,7 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | **Databases** | A `databases:` section dumps PostgreSQL, MySQL/MariaDB, MongoDB and SQLite running on the host with their own tools (`pg_dump`, `mysqldump`/`mariadb-dump`, `mongodump`, `sqlite3`) while they keep running. The dumps are streamed straight into the snapshot (no temporary files) and deduplicated like everything else. `herakles databases restore` and the GUI load a dump back into the server, also into a new database next to the current one. |
 | **Docker** | A `docker:` section makes a job back up every Compose project (and standalone container) as its own snapshot `JOB/PROJECT`: project directory, bind mounts, named volumes (also of stopped projects) and dumps of Postgres, MySQL/MariaDB and MongoDB. Projects can be stopped during their backup instead. `herakles docker restore` stops the project, restores everything, starts it and loads the dumps into fresh databases, with automatic rollback. |
 | **Web interface** | The daemon can serve the GUI on the network: accounts with Argon2id passwords and passkeys, roles (admin, user), no public sign-up (one-time setup link for the first administrator). |
+| **Updates** | Notifies about new releases (tray, window) and installs them on request through the package manager, the Windows setup or by replacing the file; announcements are signed and downloads checksummed. |
 | **Central management** | A Herakles with the web interface is a **hub**: other servers attach with a one-time **enrollment code** and keep an outbound connection to it (no open port). In the hub's GUI, pick a server to use the wizard, see its disks, run, browse and restore there. Repositories marked as shared are passed to every server **with their passwords**. Both sides authenticate with Ed25519 keys. |
 | **Extras** | Pre/post/success/failure hooks, notifications (webhook, e‑mail, command), `copy` of snapshots between repositories (3‑2‑1 replication), JSON output for scripting, run history. |
 
@@ -365,6 +366,12 @@ The daemon then serves the GUI on the network. Sign-in is by password (Argon2id)
 
 ---
 
+## Updates
+
+Herakles looks for a new release twice a day. The tray then notifies you and offers **Update to vX.Y.Z** in its menu, and the window shows **Install update**. Nothing is installed unasked. The update goes the way Herakles was installed: the package manager via pkexec (apt, dnf, zypper, pacman), the Windows setup (with a UAC prompt), or replacing the program file. Afterwards the tray restarts with the new version; while a backup runs, the update is refused. On servers, `herakles update [--check] [--yes]` does the same in a terminal and restarts the service.
+
+The release announcement `downloads/latest.json` is signed with an Ed25519 release key whose public half is built into the program (`internal/update`), and every download must match its SHA‑256. `website/deploy/deploy.sh` writes and signs it for release tags with `.herakles-signing/update-ed25519.pem` (gitignored; never commit it), and publishes it last. Turn the check off with `updates: {check: false}`.
+
 ## Central management: hub and attached servers
 
 A Herakles with the [web interface](#web-interface-with-accounts) is a **hub**. Other servers attach to it and are then managed from its GUI: pick one under **Managing** in the menu (or **Servers → Manage**) and every page — dashboard, wizard, disks, jobs, snapshots, restore, configuration, log — works on that server as if you were logged in there. Each server keeps its own configuration and schedule and keeps backing up while the hub is down; it can still be configured locally too.
@@ -486,6 +493,7 @@ The suite covers:
 * Hub: enrollment codes (checksum, expiry, one-time use), signed enrollment and logins (impostor hub, wrong key, replay, old timestamps, removed server), a pinned self-signed hub certificate, passing repositories on (conflicts, removal, still-used ones), the forwarded GUI API with roles and sandboxed answers; plus a run with two daemons and the wizard, a backup and the explorer driven through the hub in a browser.
 * Hub from the GUI: attaching and leaving in a server's own window (refused through the hub's proxy and without the service), plus a browser run: attach from the window, the hub's repository offered in the managed server's wizard, a backup into it, leave.
 * Desktop sharing of the system service: share file, status, one-time login tickets.
+* Updates: version order, signed announcements (tampered or foreign signatures refused), checksum checks, replacing the program file, one notice per release, the tray's update entry and desktop notification over D‑Bus, the window's update API; plus runs against a local release server with the real key: `herakles update`, the window's Install button (file replaced, tray restarted as the new version), and on Wine a v0.10.0 setup install updated through the tray menu by the v0.11.0 setup.
 * Windows setup: unattended and interactive installs (whole computer, own files, install only), upgrade and uninstall, run under Wine (service, shared window, tray autostart, PATH, Start menu entry, Add/Remove Programs).
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 

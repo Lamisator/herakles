@@ -241,6 +241,29 @@ function renderDaemon(info) {
       h('span', { class: 'badge ' + (info.agent.connected ? 'success' : 'warning') }, info.agent.connected ? 'hub connected' : 'hub not connected'),
       h('div', { class: 'muted', style: 'margin-top:4px;word-break:break-all' }, 'Managed by ', info.agent.hub)));
   }
+  // Updates concern this Herakles, also while managing an attached server.
+  const up = (state.hubInfo || info).update;
+  if (up && up.state.available) {
+    const st = up.state;
+    const box = h('div', { class: 'update-box' }, h('div', {}, icon('sparkle'), ' Herakles ', h('b', {}, st.latest), ' is available'));
+    if (st.installing) box.append(h('div', { class: 'hint' }, 'Updating… Herakles restarts and opens a new window.'));
+    else if (up.can_install && isAdmin()) box.append(h('button', { class: 'small primary', title: 'Download ' + st.latest + ', check its signature and install it: ' + st.hint, onclick: installUpdate }, 'Install update'));
+    else box.append(h('div', { class: 'hint' }, st.hint));
+    if (st.error && !st.installing) box.append(h('div', { class: 'hint err' }, st.error));
+    el.append(box);
+  }
+}
+
+async function installUpdate() {
+  const st = state.hubInfo.update.state;
+  if (!await confirmDlg('Update Herakles', 'Install Herakles ' + st.latest + ' (this is ' + st.current + ')? Herakles ' + st.hint + ', then restarts: this window stops working and a new one opens. While a backup runs, the update is refused, so nothing is cut off.')) return;
+  try {
+    await localApi('POST', '/api/update/install');
+    toast('Updating to ' + st.latest + '…');
+    const poll = setInterval(async () => {
+      try { await loadInfo(); renderDaemon(state.info); if (!state.hubInfo.update.state.installing) clearInterval(poll); } catch (e) { clearInterval(poll); }
+    }, 1500);
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- systems (backed-up hosts) ----------

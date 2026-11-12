@@ -33,11 +33,25 @@ func run(ctx context.Context, opts Options) error {
 		status.Disable()
 		systray.AddSeparator()
 		open := systray.AddMenuItem("Open Herakles", "Open the Herakles window")
+		upd := systray.AddMenuItem("Update", "Download and install the new Herakles version, then restart it")
+		upd.Hide()
 		systray.AddSeparator()
 		exit := systray.AddMenuItem(opts.QuitLabel, opts.QuitHint)
 
 		last := Status{State: -1}
+		lastUpd := ""
 		update := func() {
+			if opts.Update != nil {
+				if label := opts.Update(); label != lastUpd {
+					if label == "" {
+						upd.Hide()
+					} else {
+						upd.SetTitle(label)
+						upd.Show()
+					}
+					lastUpd = label
+				}
+			}
 			st := opts.Status()
 			if st == last {
 				return
@@ -58,6 +72,10 @@ func run(ctx context.Context, opts Options) error {
 				case <-open.ClickedCh:
 					if opts.Open != nil {
 						opts.Open()
+					}
+				case <-upd.ClickedCh:
+					if opts.Install != nil {
+						go opts.Install()
 					}
 				case <-exit.ClickedCh:
 					quit()

@@ -42,6 +42,8 @@ type Config struct {
 	Hub Hub `yaml:"hub,omitempty" json:"hub"`
 	// Agent attaches this machine to a hub that manages it.
 	Agent Agent `yaml:"agent,omitempty" json:"agent"`
+	// Updates: looking for new Herakles releases.
+	Updates Updates `yaml:"updates,omitempty" json:"updates"`
 	// StateDir stores run history, logs and the daemon token.
 	StateDir string `yaml:"state_dir,omitempty" json:"state_dir,omitempty"`
 
@@ -368,6 +370,22 @@ type Tray struct {
 
 // IsZero lets yaml omit empty sections.
 func (t Tray) IsZero() bool { return t == Tray{} }
+
+// Updates configures the check for new Herakles releases (twice a day).
+// The tray and the window then offer to install one; nothing is installed
+// without being asked.
+type Updates struct {
+	// Check false turns the check off (default on).
+	Check *bool `yaml:"check,omitempty" json:"check,omitempty"`
+	// URL of the signed release announcement (default: the Herakles site).
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+}
+
+// Enabled reports whether to check for updates.
+func (u Updates) Enabled() bool { return u.Check == nil || *u.Check }
+
+// IsZero lets yaml omit empty sections.
+func (u Updates) IsZero() bool { return u.Check == nil && u.URL == "" }
 
 // Web serves the GUI on the network with user accounts (password and
 // passkey logins). The daemon serves it when Listen is set.

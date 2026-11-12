@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -241,4 +242,10 @@ func ProgramData() string {
 		return pd
 	}
 	return `C:\ProgramData`
+}
+
+// Background lets cmd outlive this process without a console window.
+func Background(cmd *exec.Cmd) {
+	const createNoWindow, createNewProcessGroup = 0x08000000, 0x00000200
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow | createNewProcessGroup}
 }

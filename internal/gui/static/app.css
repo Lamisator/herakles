@@ -331,3 +331,8 @@ h2.set-section .muted { font-weight: 400; font-size: 13px; margin-left: 4px; }
 .code-box { width: 100%; font-size: 12px; word-break: break-all; white-space: pre-wrap; margin: 4px 0 8px; }
 pre.code-box { background: var(--border); padding: 6px 8px; border-radius: 6px; }
 .checks { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.update-box { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: #fff; }
+.update-box .ico { width: 14px; height: 14px; vertical-align: -2px; }
+.update-box button { margin-top: 6px; }
+.update-box .hint { margin-top: 4px; font-size: 12px; opacity: .85; }
+.update-box .hint.err { color: #ffb4b4; opacity: 1; }

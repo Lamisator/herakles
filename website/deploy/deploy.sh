@@ -6,7 +6,9 @@
 #
 # Commit first: the version shown on the site is `git describe --tags`.
 # BUILD_ONLY=1 only builds website/build for a local preview.
-# The Windows setup needs makensis (apt install nsis).
+# The Windows setup needs makensis (apt install nsis). Release tags also
+# publish downloads/latest.json for the updater, signed with
+# .herakles-signing/update-ed25519.pem (never commit it).
 # Binaries are only uploaded when they changed; older versions stay
 # available under /downloads/<version>/. On release tags the signed Linux
 # packages and apt/rpm/pacman repositories are rebuilt (packaging/build.sh)
@@ -59,6 +61,27 @@ for suffix in "${!names[@]}"; do
   subst+=(-e "s/@SIZE_${name}@/$size/g" -e "s/@SHA_${name}@/$sum/g")
 done
 (cd "$build/downloads" && sha256sum herakles-* > SHA256SUMS)
+
+# Release announcement for the updater (internal/update), signed with the
+# Ed25519 release key: only for release tags.
+if [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  key=${UPDATE_KEY:-.herakles-signing/update-ed25519.pem}
+  [[ -r $key ]] || { echo "update signing key $key missing" >&2; exit 1; }
+  python3 - "$VERSION" "$URL" "$build/downloads/$VERSION" "$(git log -1 --format=%s)" > "$build/downloads/latest.json" <<'PY'
+import hashlib, json, os, sys, datetime
+version, url, d, notes = sys.argv[1:5]
+files = {}
+prefix = "herakles-" + version + "-"
+for name in sorted(os.listdir(d)):
+    if not name.startswith(prefix):
+        continue
+    data = open(os.path.join(d, name), "rb").read()
+    files[name[len(prefix):]] = {"url": f"{url}/downloads/{version}/{name}", "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+print(json.dumps({"version": version, "released": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "notes": notes, "files": files}, indent=1))
+PY
+  openssl pkeyutl -sign -inkey "$key" -rawin -in "$build/downloads/latest.json" | base64 -w0 > "$build/downloads/latest.json.sig"
+  echo >> "$build/downloads/latest.json.sig"
+fi
 (cd "$build/downloads/$VERSION" && sha256sum herakles-* > SHA256SUMS)
 sed -i "${subst[@]}" "$build"/release/*.html
 if grep -n '@[A-Z_a-z0-9.-]*@' "$build"/release/*.html; then
@@ -88,7 +111,7 @@ tar -C website/deploy -cf - docker-compose.yml nginx.conf | remote "tar -xf - -C
 if [[ "$(remote "cat $DIR/www/downloads/$VERSION/SHA256SUMS 2>/dev/null" || true)" == "$(cat "$build/downloads/$VERSION/SHA256SUMS")" ]]; then
   echo "   binaries unchanged"
 else
-  tar -C "$build/downloads" -cf - . | remote "tar -xf - -C $DIR/www/downloads"
+  tar -C "$build/downloads" --exclude='./latest.json*' -cf - . | remote "tar -xf - -C $DIR/www/downloads"
 fi
 if [[ -n $packages ]]; then
   if [[ "$(remote "cat $DIR/www/packages/VERSION 2>/dev/null" || true)" == "$VERSION" && ${REPACKAGE:-} != 1 ]]; then
@@ -115,6 +138,11 @@ tar -C "$build/release" -cf - . | remote "set -e
   if ! docker exec herakles-web cat /etc/nginx/conf.d/default.conf 2>/dev/null | cmp -s - nginx.conf; then
     docker restart herakles-web >/dev/null
   fi"
+
+# Announce the release only now that files, packages and site are online.
+if [[ -e $build/downloads/latest.json ]]; then
+  tar -C "$build/downloads" -cf - latest.json latest.json.sig | remote "tar -xf - -C $DIR/www/downloads"
+fi
 
 echo "== checking $URL"
 for _ in $(seq 30); do

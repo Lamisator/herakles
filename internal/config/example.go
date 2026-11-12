@@ -205,6 +205,11 @@ tray:
   # log in to your desktop. Use either this or the daemon service.
   autostart: false
 
+# Herakles looks for new releases twice a day; the tray icon and the window
+# then offer to install them (nothing is installed without asking).
+# updates:
+#   check: false                       # turn the check off
+
 server:
   listen: ":8443"
   data_dir: /srv/herakles

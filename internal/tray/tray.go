@@ -51,6 +51,10 @@ type Options struct {
 	// calling Warn (default 30s); the icon still appears if one starts later.
 	HostWait time.Duration
 	Warn     func(msg string)
+	// Update is polled with Status; a non-empty label (such as "Update to
+	// v1.2.0") shows a menu entry that calls Install.
+	Update  func() string
+	Install func()
 }
 
 // Run shows the tray icon and blocks until ctx is cancelled or the user

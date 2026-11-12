@@ -20,6 +20,7 @@ import (
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/engine"
 	tu "github.com/lamisator/herakles/internal/testutil"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 type client struct {
@@ -350,5 +351,43 @@ func countTar(r io.Reader) int {
 			return n
 		}
 		n++
+	}
+}
+
+// TestUpdateAPI shows a new release in /api/info and starts the install only
+// where the window may update Herakles.
+func TestUpdateAPI(t *testing.T) {
+	_, s, _ := setup(t, true)
+	st := update.State{Current: "v0.10.0", Latest: "v0.11.0", Available: true, Method: "file", Hint: "replaces /x"}
+	s.upd = func() update.State { return st }
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	c := &client{t: t, url: ts.URL, tok: s.Token()}
+	var info struct {
+		Update struct {
+			State      update.State
+			CanInstall bool `json:"can_install"`
+		}
+	}
+	c.json("GET", "/api/info", nil, &info)
+	if !info.Update.State.Available || info.Update.State.Latest != "v0.11.0" || info.Update.CanInstall {
+		t.Fatalf("%+v", info.Update)
+	}
+	if code, body := c.do("POST", "/api/update/install", nil); code != 400 || !strings.Contains(string(body), "replaces") {
+		t.Fatal("install without an installer:", code, string(body))
+	}
+	called := make(chan bool, 1)
+	s.install = func() error { called <- true; return nil }
+	c.json("GET", "/api/info", nil, &info)
+	if !info.Update.CanInstall {
+		t.Fatal("can_install missing")
+	}
+	if code, _ := c.do("POST", "/api/update/install", nil); code != 202 {
+		t.Fatal("install:", code)
+	}
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("install not called")
 	}
 }

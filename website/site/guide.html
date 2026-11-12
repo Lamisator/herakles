@@ -25,7 +25,7 @@
   <p>Contents</p>
   <ol>
     <li><a href="#overview">Overview</a></li>
-    <li><a href="#install">Installation</a></li>
+    <li><a href="#install">Installation</a> (<a href="#windows-setup">Windows</a>, <a href="#updates">updates</a>)</li>
     <li><a href="#quick-start">Quick start</a>
       <ol><li><a href="#qs-gui">With the desktop interface</a></li><li><a href="#qs-cli">With the command line</a></li><li><a href="#qs-adhoc">Without a configuration</a></li></ol></li>
     <li><a href="#concepts">Concepts</a></li>
@@ -132,7 +132,7 @@ herakles version</pre>
 <li><b>Only my own files</b>: Herakles runs as you while you are logged in, with your configuration in <code>%APPDATA%\Herakles</code>.</li>
 <li><b>Install only</b>.</li>
 </ul>
-<p>It can also add Herakles to the <code>PATH</code> and start the tray icon at login. After that, the backup wizard in the Herakles window sets up the first backup; no console is needed. Running a newer setup updates Herakles and restarts the service, keeping all settings. Uninstalling removes the service, autostart and PATH entries; it keeps the configuration unless you tick “Delete the service's configuration and logs” (your backups in the repositories are never touched). For other users of the computer: <code>herakles daemon desktop on --user NAME</code> in an administrator terminal.</p>
+<p>It adds <b>Herakles</b> to the Start menu, can add Herakles to the <code>PATH</code> and start the tray icon at login. (Without the setup, the first start of the tray adds a Start menu entry for you.) After that, the backup wizard in the Herakles window sets up the first backup; no console is needed. Running a newer setup updates Herakles and restarts the service, keeping all settings. Uninstalling removes the service, autostart and PATH entries; it keeps the configuration unless you tick “Delete the service's configuration and logs” (your backups in the repositories are never touched). For other users of the computer: <code>herakles daemon desktop on --user NAME</code> in an administrator terminal.</p>
 <p>Unattended installation, for example from a deployment tool:</p>
 <pre>herakles-setup.exe /S /MODE=desktop               <span class="c"># desktop = whole computer, user = own files, none</span>
 herakles-setup.exe /S /MODE=desktop /HUB=HKE1-… /NAME=office-pc /USER=CORP\alex
@@ -144,8 +144,21 @@ herakles-setup.exe /S /NOAUTOSTART /NOPATH /D=D:\Apps\Herakles
 .\herakles.exe version</pre>
 <h3>macOS (experimental)</h3>
 <p>The Apple Silicon build has not been tested on a Mac yet. CLI, terminal UI and GUI are expected to work; the tray icon is not available. Remove the download quarantine with <code>xattr -d com.apple.quarantine herakles-macos-arm64</code>.</p>
-<h3>Updating and removing</h3>
-<p>Packages update with the system, the Windows setup by running a newer setup. For the single file, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. With the Windows setup, use <em>Settings → Apps</em> instead. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
+<h3 id="updates">Updates</h3>
+<p>Herakles looks for a new release twice a day (from version 0.11.0 on). When there is one, you get a desktop notification, the tray menu shows <b>Update to vX.Y.Z</b>, and the Herakles window shows a notice with <b>Install update</b>. Nothing is installed until you choose it. Herakles then updates the way it was installed:</p>
+<ul>
+<li><b>Linux package:</b> with apt, dnf, zypper or pacman, asking for the administrator password (pkexec). The package restarts the system service.</li>
+<li><b>Windows setup:</b> downloads the new setup and runs it; Windows asks for administrator rights. The setup restarts the service.</li>
+<li><b>Single file</b> (where you may write it): replaces the program file.</li>
+</ul>
+<p>Afterwards the tray restarts with the new version and opens a new window. While a backup runs, the update is refused, so nothing is cut off. The release announcement (<code>downloads/latest.json</code>) must carry the signature of the Herakles release key built into the program, and every download must match its SHA‑256 checksum; otherwise nothing is installed.</p>
+<p>On servers, the window of the service and the web interface only show that an update exists. Install it in a terminal:</p>
+<pre>herakles update --check        <span class="c"># is there a new version?</span>
+sudo herakles update           <span class="c"># show it, ask, install; restarts the service</span>
+sudo herakles update --yes     <span class="c"># without asking (scripts)</span></pre>
+<p>To turn the check off, set <code>updates: {check: false}</code> in the configuration.</p>
+<h3>Updating by hand and removing</h3>
+<p>Packages also update with the system, the Windows setup by running a newer setup. For the single file, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. With the Windows setup, use <em>Settings → Apps</em> instead. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
 
 <h2 id="quick-start">Quick start</h2>
 <h3 id="qs-gui">With the desktop interface</h3>

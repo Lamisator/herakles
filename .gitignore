@@ -10,3 +10,4 @@ coverage.*
 id_ssh
 .herakles-*.pw
 /.herakles-signing/
+/cmd/herakles/rsrc_windows_*.syso

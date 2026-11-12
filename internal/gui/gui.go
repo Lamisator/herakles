@@ -37,6 +37,7 @@ import (
 	"github.com/lamisator/herakles/internal/repository"
 	"github.com/lamisator/herakles/internal/restorer"
 	"github.com/lamisator/herakles/internal/tray"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 //go:embed static
@@ -64,6 +65,10 @@ type Options struct {
 	Hub *hub.Hub
 	// Agent reports the connection to this machine's hub, if attached.
 	Agent func() *hub.AgentState
+	// Update reports new Herakles releases; InstallUpdate (nil where this
+	// window cannot update Herakles itself) installs one and restarts.
+	Update        func() update.State
+	InstallUpdate func() error
 }
 
 // Server is the GUI backend.
@@ -78,6 +83,8 @@ type Server struct {
 	service bool
 	hub     *hub.Hub
 	agent   func() *hub.AgentState
+	upd     func() update.State
+	install func() error
 
 	ticketMu sync.Mutex
 	tickets  map[string]time.Time
@@ -102,7 +109,7 @@ func newServer(ctx context.Context, eng *engine.Engine, opts Options) (*Server, 
 		runner = daemon.NewRunner(ctx, eng, 2)
 	}
 	eng.Prompt = nil
-	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx, service: opts.Service, hub: opts.Hub, agent: opts.Agent}
+	s := &Server{eng: eng, runner: runner, logs: logs, token: hex.EncodeToString(tok), version: opts.Version, ctx: ctx, service: opts.Service, hub: opts.Hub, agent: opts.Agent, upd: opts.Update, install: opts.InstallUpdate}
 	if opts.Web != nil {
 		if opts.Web.Log == nil {
 			opts.Web.Log = eng.Log
@@ -277,8 +284,10 @@ func decode(r *http.Request, v any) error {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := s.apiMux()
-	// Not part of apiMux: a hub must not re-attach a server it manages.
+	// Not part of apiMux: a hub must not re-attach a server it manages,
+	// nor update it.
 	s.agentRoutes(mux)
+	mux.HandleFunc("POST /api/update/install", s.installUpdate)
 	static, _ := fs.Sub(assets, "static")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	if s.web != nil {
@@ -478,6 +487,10 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.hub != nil {
 		out["hub"] = true
+	}
+	if s.upd != nil {
+		st := s.upd()
+		out["update"] = map[string]any{"state": st, "can_install": s.install != nil}
 	}
 	if s.agent != nil {
 		out["can_attach"] = true
@@ -1142,4 +1155,22 @@ func (s *Server) diff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, nonNil(changes))
+}
+
+// installUpdate starts the update; Herakles restarts when it is done, and
+// errors show up in the update state.
+func (s *Server) installUpdate(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	if s.install == nil {
+		hint := "this window cannot update Herakles"
+		if s.upd != nil && s.upd().Hint != "" {
+			hint = s.upd().Hint
+		}
+		writeJSON(w, 400, apiError{Error: hint})
+		return
+	}
+	go func() { _ = s.install() }()
+	writeJSON(w, 202, map[string]any{"started": true})
 }

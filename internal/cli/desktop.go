@@ -20,6 +20,7 @@ import (
 	"github.com/lamisator/herakles/internal/gui"
 	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/sysutil"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 // desktopShare serves the GUI of the system service for the users in
@@ -32,6 +33,8 @@ type desktopShare struct {
 	inst *gui.Instance
 	// agent reports the hub connection, once started.
 	agent func() *hub.AgentState
+	// upd reports new releases, if checked.
+	upd func() update.State
 }
 
 // update starts the GUI when the first user is added and rewrites the share
@@ -49,7 +52,7 @@ func (s *desktopShare) update(cfg *config.Config) {
 		return
 	}
 	if s.inst == nil {
-		inst, err := gui.Start(s.ctx, s.a.eng, gui.Options{Listen: cfg.GUI.Listen, Version: Version, Runner: s.d.Runner, Logs: s.d.Logs, Service: true, Agent: s.agent})
+		inst, err := gui.Start(s.ctx, s.a.eng, gui.Options{Listen: cfg.GUI.Listen, Version: Version, Runner: s.d.Runner, Logs: s.d.Logs, Service: true, Agent: s.agent, Update: s.upd})
 		if err != nil {
 			log.Error("desktop GUI not started", "err", err)
 			return

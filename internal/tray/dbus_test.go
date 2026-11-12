@@ -65,6 +65,9 @@ func menuLabels(t *testing.T, menu dbus.BusObject) (labels map[string]int32, dis
 		if err := dbus.Store([]any{c.Value()}, &it); err != nil {
 			t.Fatal(err)
 		}
+		if v, ok := it.Props["visible"]; ok && !v.Value().(bool) {
+			continue
+		}
 		if l, ok := it.Props["label"]; ok {
 			s := l.Value().(string)
 			labels[s] = it.ID
@@ -86,7 +89,9 @@ func TestTrayOverDBus(t *testing.T) {
 	defer cancel()
 	// Start before the panel, as at login: Run warns, then registers once
 	// the watcher appears.
-	var opened, quit atomic.Int32
+	var opened, quit, installed atomic.Int32
+	updateLabel := atomic.Value{}
+	updateLabel.Store("")
 	warned := make(chan string, 1)
 	status := atomic.Value{}
 	status.Store(Status{Idle, "Next backup: home in 2.0 h"})
@@ -96,6 +101,8 @@ func TestTrayOverDBus(t *testing.T) {
 			Status:   func() Status { return status.Load().(Status) },
 			Interval: 50 * time.Millisecond,
 			Open:     func() { opened.Add(1) },
+			Update:   func() string { return updateLabel.Load().(string) },
+			Install:  func() { installed.Add(1) },
 			Quit:     func() { quit.Add(1) },
 			HostWait: 200 * time.Millisecond,
 			Warn:     func(m string) { warned <- m },
@@ -188,6 +195,22 @@ func TestTrayOverDBus(t *testing.T) {
 	}
 	waitFor("open on left click", func() bool { return opened.Load() == 2 })
 
+	// No update: no entry. A new release shows it; clicking installs.
+	for l := range labels {
+		if strings.HasPrefix(l, "Update") {
+			t.Fatalf("update entry without an update: %v", labels)
+		}
+	}
+	updateLabel.Store("Update to v9.9.9")
+	waitFor("update entry", func() bool {
+		l, _ := menuLabels(t, menu)
+		_, ok := l["Update to v9.9.9"]
+		return ok
+	})
+	labels, _ = menuLabels(t, menu)
+	click(labels["Update to v9.9.9"])
+	waitFor("install from menu", func() bool { return installed.Load() == 1 })
+
 	// The tray may leave the bus before answering this click.
 	_ = menu.Call("com.canonical.dbusmenu.Event", 0, labels["Quit Herakles"], "clicked", dbus.MakeVariant(""), uint32(0)).Err
 	select {
@@ -200,5 +223,40 @@ func TestTrayOverDBus(t *testing.T) {
 	}
 	if quit.Load() != 1 {
 		t.Fatalf("Quit callback ran %d times", quit.Load())
+	}
+}
+
+type notifications struct{ got chan [2]string }
+
+func (n *notifications) Notify(app string, replaces uint32, icon, summary, body string, actions []string, hints map[string]dbus.Variant, timeout int32) (uint32, *dbus.Error) {
+	n.got <- [2]string{summary, body}
+	return 1, nil
+}
+
+// TestNotify sends a desktop notification to a fake notification service.
+func TestNotify(t *testing.T) {
+	privateBus(t)
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	n := &notifications{got: make(chan [2]string, 1)}
+	if err := conn.Export(n, "/org/freedesktop/Notifications", "org.freedesktop.Notifications"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.RequestName("org.freedesktop.Notifications", dbus.NameFlagDoNotQueue); err != nil {
+		t.Fatal(err)
+	}
+	if err := Notify("Herakles v9.9.9 is available", "Choose “Update”"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-n.got:
+		if got[0] != "Herakles v9.9.9 is available" || got[1] != "Choose “Update”" {
+			t.Fatal(got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notification")
 	}
 }

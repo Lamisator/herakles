@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -21,6 +22,7 @@ import (
 	"github.com/lamisator/herakles/internal/hub"
 	"github.com/lamisator/herakles/internal/server"
 	"github.com/lamisator/herakles/internal/ui"
+	"github.com/lamisator/herakles/internal/update"
 )
 
 func (a *App) daemonCmd() *cobra.Command {
@@ -254,6 +256,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	}
 	ag := a.startAgent(ctx, d)
 	share.agent = ag.State
+	share.upd = a.serviceUpdates(ctx)
 	share.update(a.cfg)
 	defer share.close()
 	var hb *hub.Hub
@@ -274,7 +277,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 		go func() {
 			for delay := 5 * time.Second; ; delay = min(2*delay, 2*time.Minute) {
 				opts := a.webOptions(d)
-				opts.Hub, opts.Agent = hb, ag.State
+				opts.Hub, opts.Agent, opts.Update = hb, ag.State, share.upd
 				inst, err := gui.Start(ctx, a.eng, opts)
 				if err == nil {
 					a.eng.Log.Info("web interface started", "listen", a.cfg.Web.Listen, "url", a.cfg.Web.URL)
@@ -292,6 +295,25 @@ func (a *App) runDaemon(ctx context.Context) error {
 		}()
 	}
 	return d.Run(ctx)
+}
+
+// serviceUpdates looks for new releases for the daemon's windows. The
+// daemon does not update itself: it may be in the middle of a backup, and
+// the package manager or setup restarts it anyway.
+func (a *App) serviceUpdates(ctx context.Context) func() update.State {
+	if !a.cfg.Updates.Enabled() || !update.Valid(Version) {
+		return nil
+	}
+	m := update.Detect()
+	m.Hint = "Run 'sudo herakles update' in a terminal, or choose “Update” in the menu of the Herakles tray icon."
+	if runtime.GOOS == "windows" {
+		m.Hint = "Choose “Update” in the menu of the Herakles tray icon, run the new herakles-setup.exe, or 'herakles update' in an administrator terminal."
+	}
+	chk := &update.Checker{URL: a.cfg.Updates.URL, Current: Version, OnNew: func(r *update.Release) {
+		a.eng.Log.Info("new Herakles version available", "version", r.Version, "how", m.Hint)
+	}}
+	go chk.Run(ctx)
+	return func() update.State { return chk.State(m) }
 }
 
 // newDaemon sets up logging and creates the daemon; it reloads the
