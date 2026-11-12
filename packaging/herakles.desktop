@@ -5,6 +5,7 @@ GenericName=Backup
 Comment=Deduplicated, encrypted backups of files, disks and Docker projects
 Exec=herakles tray --open
 Icon=herakles
+StartupWMClass=herakles
 Terminal=false
 Categories=Utility;Archiving;System;
 Keywords=backup;restore;snapshot;docker;

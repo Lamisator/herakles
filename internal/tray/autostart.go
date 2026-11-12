@@ -29,7 +29,9 @@ func desktopEntry(cmd Command, icon string, autostart bool) string {
 	if icon != "" {
 		b.WriteString("Icon=" + icon + "\n")
 	}
-	b.WriteString("Terminal=false\nCategories=Utility;Archiving;\n")
+	// The Herakles window (herakles-window) runs as app ID / WM_CLASS
+	// "herakles": the desktop shows this entry's icon for it.
+	b.WriteString("StartupWMClass=herakles\nTerminal=false\nCategories=Utility;Archiving;\n")
 	if autostart {
 		b.WriteString("X-GNOME-Autostart-enabled=true\n")
 	}

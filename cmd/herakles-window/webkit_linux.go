@@ -35,6 +35,7 @@ func run(url, title, icon string, w, h int) error {
 		gtkWindowSetTitle func(win uintptr, title string)
 		gtkWindowSetSize  func(win uintptr, w, h int32)
 		gtkWindowSetIcon  func(win uintptr, name string)
+		gtkSetDefaultIcon func(name string)
 		gtkContainerAdd   func(c, child uintptr)
 		gtkWidgetShowAll  func(w uintptr)
 		gtkMain           func()
@@ -48,6 +49,7 @@ func run(url, title, icon string, w, h int) error {
 	purego.RegisterLibFunc(&gtkWindowSetTitle, gtk, "gtk_window_set_title")
 	purego.RegisterLibFunc(&gtkWindowSetSize, gtk, "gtk_window_set_default_size")
 	purego.RegisterLibFunc(&gtkWindowSetIcon, gtk, "gtk_window_set_icon_name")
+	purego.RegisterLibFunc(&gtkSetDefaultIcon, gtk, "gtk_window_set_default_icon_name")
 	purego.RegisterLibFunc(&gtkContainerAdd, gtk, "gtk_container_add")
 	purego.RegisterLibFunc(&gtkWidgetShowAll, gtk, "gtk_widget_show_all")
 	purego.RegisterLibFunc(&gtkMain, gtk, "gtk_main")
@@ -59,6 +61,17 @@ func run(url, title, icon string, w, h int) error {
 	if err != nil {
 		return err
 	}
+	// Wayland has no window icons: the compositor (KDE, GNOME) shows the
+	// icon of the .desktop file named like the app ID, which GTK takes from
+	// the program name. As "herakles" it finds herakles.desktop instead of
+	// showing the generic Wayland icon; on X11 it sets WM_CLASS likewise.
+	if glib, err := open("libglib-2.0.so.0"); err == nil {
+		var setPrgname, setAppName func(string)
+		purego.RegisterLibFunc(&setPrgname, glib, "g_set_prgname")
+		purego.RegisterLibFunc(&setAppName, glib, "g_set_application_name")
+		setPrgname(icon)
+		setAppName(title)
+	}
 	if !gtkInitCheck(0, 0) {
 		return errors.New("no display")
 	}
@@ -66,6 +79,7 @@ func run(url, title, icon string, w, h int) error {
 	gtkWindowSetTitle(win, title)
 	gtkWindowSetSize(win, int32(w), int32(h))
 	gtkWindowSetIcon(win, icon)
+	gtkSetDefaultIcon(icon)
 	view := webViewNew()
 	gtkContainerAdd(win, view)
 	// gtk_main_quit ignores the arguments a "destroy" handler gets.
