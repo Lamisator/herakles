@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 
@@ -35,6 +36,9 @@ func (p *program) Stop(s service.Service) error {
 
 func newService(configPath string, userService bool, run func(ctx context.Context) error) (service.Service, error) {
 	args := []string{"daemon", "run"}
+	if runtime.GOOS == "windows" {
+		args = append(args, "--service")
+	}
 	if configPath != "" {
 		args = append(args, "--config", configPath)
 	}
@@ -80,12 +84,27 @@ func ServiceControl(action, configPath string, userService bool) (string, error)
 	return action + " ok", nil
 }
 
+// ServiceInstalled reports whether the system service is installed.
+func ServiceInstalled() bool {
+	s, err := newService("", false, nil)
+	if err != nil {
+		return false
+	}
+	_, err = s.Status()
+	return !errors.Is(err, service.ErrNotInstalled)
+}
+
 // Interactive reports whether we run in a terminal rather than under a
 // service manager.
 func Interactive() bool { return service.Interactive() }
 
-// RunService runs fn under the platform service manager.
-func RunService(configPath string, fn func(ctx context.Context) error) error {
+// RunService runs fn under the platform service manager. force skips
+// asking the system whether this process is a service (daemon run
+// --service, which the Windows service is registered with).
+func RunService(configPath string, force bool, fn func(ctx context.Context) error) error {
+	if force {
+		return runAsService(fn)
+	}
 	s, err := newService(configPath, false, fn)
 	if err != nil {
 		return err

@@ -25,19 +25,21 @@ import (
 
 func (a *App) daemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "Run and control the background backup service"}
-	var userService bool
+	var userService, asService bool
 	run := &cobra.Command{
 		Use:   "run",
 		Short: "Run the daemon in the foreground (used by the system service)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fn := func(ctx context.Context) error { return a.runDaemon(ctx) }
-			if !daemon.Interactive() {
-				return daemon.RunService(a.cfg.Path(), fn)
+			if asService || !daemon.Interactive() {
+				return daemon.RunService(a.cfg.Path(), asService, fn)
 			}
 			return fn(cmd.Context())
 		},
 	}
+	run.Flags().BoolVar(&asService, "service", false, "run for the Windows service control manager (set by 'daemon install')")
+	_ = run.Flags().MarkHidden("service")
 	status := &cobra.Command{
 		Use: "status", Short: "Show daemon status, schedule and running tasks", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

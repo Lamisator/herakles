@@ -710,13 +710,42 @@ function retentionText(r) {
   return parts.length ? parts.join(', ') : 'keep everything';
 }
 
+// Repositories of the hub that the attached server being managed does not
+// have yet. Choosing one passes it on (with its password) when saving.
+async function hubOffers(cfg) {
+  if (!state.target || !isAdmin()) return [];
+  try {
+    const hc = await localApi('GET', '/api/config');
+    const have = new Set((cfg.repositories || []).map(r => r.name));
+    return (hc.repositories || []).filter(r => !r.hub && !have.has(r.name)).map(r => ({ name: r.name, location: r.location, offer: true }));
+  } catch (e) { return []; }
+}
+
+// useHubRepo shares a hub repository with the attached servers and waits
+// until the managed server has it; it returns the server's configuration.
+async function useHubRepo(name) {
+  const hub = await localApi('GET', '/api/hub');
+  const shared = new Set(hub.shared || []);
+  if (!shared.has(name)) {
+    shared.add(name);
+    await localApi('PUT', '/api/hub/shared', { repositories: [...shared] });
+  }
+  for (let i = 0; i < 40; i++) {
+    const c = await loadConfig();
+    if ((c.repositories || []).some(r => r.name === name)) return c;
+    await new Promise(res => setTimeout(res, 500));
+  }
+  throw new Error('The server did not receive the repository “' + name + '” from the hub. Is it online?');
+}
+const offerNote = 'From the hub: passed to the attached servers with its password when you save (Servers page → Repositories for all servers).';
+
 const lines = v => (v || []).join('\n');
 const unlines = v => v.split('\n').map(x => x.trim()).filter(Boolean);
 const num = el => parseInt(el.value, 10) || 0;
 
 async function editJob(name) {
   const cfg = await loadConfig();
-  const repos = cfg.repositories || [];
+  const repos = (cfg.repositories || []).concat(await hubOffers(cfg));
   if (!repos.length) { toast('Add a repository first', true); navigate('repos'); return; }
   const orig = name ? cfg.jobs.find(j => j.name === name) : null;
   const j = orig ? JSON.parse(JSON.stringify(orig)) : { repository: repos[0].name, schedule: [{ cron: '0 2 * * *', type: 'auto' }], full_interval: '7d', retention: { keep_daily: 7, keep_weekly: 4, keep_monthly: 12 } };
@@ -725,7 +754,7 @@ async function editJob(name) {
   const dbs = databaseEditor(j);
   const f = {
     name: h('input', { value: j.name || '' }), description: h('input', { value: j.description || '' }),
-    repository: h('select', {}, repos.map(x => h('option', { value: x.name, selected: x.name === j.repository }, x.name + ' — ' + x.location))),
+    repository: h('select', { title: repos.some(x => x.offer) ? offerNote : null }, repos.map(x => h('option', { value: x.name, selected: x.name === j.repository }, x.name + ' — ' + x.location + (x.offer ? ' (from the hub)' : '')))),
     paths: h('textarea', { rows: 3, placeholder: '/home\n/etc' }, lines(j.paths)),
     devices: h('textarea', { rows: 2, placeholder: '/dev/sda1   or   \\\\.\\C:' }, lines(j.devices)),
     exclude: h('textarea', { rows: 3, placeholder: '*.tmp\n**/node_modules\n/home/*/Downloads' }, lines(j.exclude)),
@@ -818,6 +847,8 @@ async function editJob(name) {
       nj.docker = dock.value();
       nj.databases = dbs.value();
       if (!nj.docker && !nj.paths.length && !nj.devices.length && !nj.databases.length) { toast('Choose paths, disks, databases or Docker projects to back up', true); return false; }
+      const offer = repos.find(x => x.offer && x.name === nj.repository);
+      if (offer) await useHubRepo(offer.name);
       const c = await loadConfig();
       c.jobs = c.jobs || [];
       const i = orig ? c.jobs.findIndex(x => x.name === orig.name) : -1;
@@ -1051,7 +1082,12 @@ views.repos = async main => {
   main.append(h('h1', {}, 'Repositories'), h('div', { class: 'sub' }, 'Encrypted, deduplicated storage locations: local disks, network shares, SFTP or a Herakles server.'),
     h('div', { class: 'toolbar' }, h('button', { class: 'primary', onclick: () => editRepo(null) }, '+ Add repository')));
   const repos = cfg.repositories || [];
-  if (!repos.length) { main.append(h('div', { class: 'empty' }, 'No repositories yet. Add one to start backing up.')); return; }
+  const offers = await hubOffers(cfg);
+  if (offers.length) {
+    main.append(h('div', { class: 'notice info' }, icon('server'), h('span', {}, 'The hub\'s repositories ', h('b', {}, offers.map(r => r.name).join(', ')),
+      ' can be chosen in the backup wizard and the job editor of this server. The hub passes a repository on, with its password, when a job of this server uses it.')));
+  }
+  if (!repos.length) { main.append(h('div', { class: 'empty' }, 'No repositories yet. Add one to start backing up' + (offers.length ? ', or use one of the hub\'s.' : '.'))); return; }
   const grid = h('div', { class: 'grid' });
   main.append(grid);
   for (const r of repos) {
@@ -1192,6 +1228,53 @@ async function editRepo(name) {
 }
 
 // ---------- settings (YAML) ----------
+// hubCard attaches this computer to a hub (enrollment code) or detaches it.
+function hubCard() {
+  const info = state.info || {};
+  if (state.target) return '';
+  const card = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Central management'));
+  if (!info.can_attach) {
+    card.append(h('div', {}, 'A Herakles hub can manage this computer: its backups, repositories and restores, from one web interface.'),
+      h('div', { class: 'meta' }, 'Only the Herakles service connects to a hub. Let the service run the backups (',
+        h('span', { class: 'mono' }, info.os === 'windows' ? 'herakles daemon desktop on' : 'sudo herakles daemon desktop on'),
+        info.os === 'windows' ? ' as administrator, or the setup\'s “Whole computer” option' : '', '), then attach it here.'));
+    return card;
+  }
+  const a = info.agent;
+  if (a) {
+    card.append(h('div', {}, h('span', { class: 'badge ' + (a.connected ? 'success' : 'warning') }, a.connected ? 'connected' : 'not connected'),
+      ' Managed by ', h('b', {}, a.hub), a.name ? ' as ' : '', a.name ? h('b', {}, a.name) : null),
+      a.error ? h('div', { class: 'meta', style: 'color:var(--warn)' }, a.error) : '',
+      h('div', { class: 'meta' }, 'The hub\'s administrators can see and change this computer\'s backups and configuration, and restore files to it.'),
+      isAdmin() ? h('div', { class: 'actions' }, h('button', { class: 'danger', onclick: async () => {
+        if (!await confirmDlg('Leave the hub', 'Detach this computer from ' + a.hub + '? Its backups keep running here. Repositories the hub passed on stay configured where jobs use them. Remove the computer on the hub\'s Servers page too.', true)) return;
+        try {
+          const r = await api('POST', '/api/hub/leave');
+          toast(r.kept && r.kept.length ? 'Detached; kept the hub\'s repositories ' + r.kept.join(', ') : 'Detached from the hub');
+          await loadInfo(); navigate('settings');
+        } catch (e) { toast(e.message, true); }
+      } }, 'Leave the hub')) : '');
+    return card;
+  }
+  const code = h('input', { placeholder: 'HKE1-…', spellcheck: 'false', autocomplete: 'off', class: 'mono' });
+  const name = h('input', { placeholder: info.hostname || '' });
+  const btn = h('button', { class: 'primary', onclick: async () => {
+    btn.disabled = true;
+    try {
+      const r = await api('POST', '/api/hub/join', { code: code.value.trim(), name: name.value.trim() });
+      toast('Attached to ' + r.hub + ' as ' + r.name);
+      for (let i = 0; i < 20; i++) { await new Promise(res => setTimeout(res, 500)); await loadInfo(); if (state.info.agent && state.info.agent.connected) break; }
+      navigate('settings');
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  } }, 'Attach to the hub');
+  card.append(h('div', {}, 'Let a Herakles hub manage this computer: backups, repositories and restores from one web interface. The hub passes on its repositories, so this computer needs no repository passwords of its own.'),
+    h('div', { class: 'row' }, h('div', {}, h('label', {}, 'Enrollment code (hub: Servers → Enroll a server)'), code),
+      h('div', {}, h('label', {}, 'Name on the hub (optional)'), name)),
+    h('div', { class: 'meta' }, 'The code is valid once. This computer connects out to the hub, so it needs no open port. The hub\'s administrators get full control over its backups.'),
+    isAdmin() ? h('div', { class: 'actions' }, btn) : '');
+  return card;
+}
+
 views.settings = async main => {
   const data = await api('GET', '/api/config/yaml');
   const cfg = await loadConfig();
@@ -1205,13 +1288,14 @@ views.settings = async main => {
     } catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
   } });
   main.append(h('h1', {}, 'Configuration'),
-    state.info && state.info.service
+    state.info && state.info.mode === 'web' ? '' : state.info && state.info.service
       ? h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
-        h('div', {}, 'This window belongs to the Herakles system service: it runs as root, so it can back up whole disks and every file, also when nobody is logged in.'),
-        h('div', { class: 'meta' }, 'Shared with: ' + (state.info.service.users.join(', ') || 'nobody') + ' (gui.users). Change with ', h('span', { class: 'mono' }, 'sudo herakles daemon desktop on|off --user NAME'), '.'))
+        h('div', {}, 'This window belongs to the Herakles system service: it runs as ' + (state.info.os === 'windows' ? 'LocalSystem' : 'root') + ', so it can back up whole disks and every file, also when nobody is logged in.'),
+        h('div', { class: 'meta' }, 'Shared with: ' + (state.info.service.users.join(', ') || 'nobody') + ' (gui.users). Change with ', h('span', { class: 'mono' }, state.info.os === 'windows' ? 'herakles daemon desktop on|off --user NAME' : 'sudo herakles daemon desktop on|off --user NAME'), state.info.os === 'windows' ? ' as administrator.' : '.'))
       : h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h3', {}, 'Desktop'),
         h('label', { class: 'check' }, autostart, 'Start Herakles in the system tray when I log in'),
         h('div', { class: 'meta' }, 'Runs scheduled backups and this interface in the background (tray.autostart). Use either this or the daemon service. To back up whole disks or system files, let the system service run them: ', h('span', { class: 'mono' }, 'sudo herakles daemon desktop on'), '.')),
+    hubCard(),
     h('div', { class: 'sub' }, 'Full YAML configuration (', h('span', { class: 'mono' }, data.path), '). Comments are preserved when saving here. Everything — notifications, daemon and server settings — can be edited.'),
     h('div', { class: 'toolbar' },
       h('button', { class: 'primary', onclick: async () => { try { await api('PUT', '/api/config/yaml', { yaml: ta.value }); toast('Saved and applied'); } catch (e) { toast(e.message, true); } } }, 'Validate & save'),
@@ -1263,7 +1347,7 @@ function genPassword() {
 
 views.wizard = async main => {
   const [info, cfg] = await Promise.all([api('GET', '/api/wizard/info'), loadConfig()]);
-  const repos = cfg.repositories || [];
+  const repos = (cfg.repositories || []).concat(await hubOffers(cfg));
   const jobs = cfg.jobs || [];
   const win = info.os === 'windows';
   const wz = {
@@ -1366,9 +1450,11 @@ views.wizard = async main => {
       };
       const out = [h('h2', {}, icon('repos'), 'Where should the backups go?'), h('div', { class: 'sub' }, 'Backups are stored in a repository: deduplicated, compressed and encrypted.')];
       out.push(h('div', { class: 'tiles' },
-        repos.map(r => tile(r.location.startsWith('smb://') ? 'share' : r.location.startsWith('sftp://') ? 'terminal' : r.location.startsWith('herakles') ? 'server' : 'usb',
-          r.name, r.location, wz.repoMode === 'existing' && wz.repo === r.name, () => { wz.repoMode = 'existing'; wz.repo = r.name; render(); })),
+        repos.map(r => tile(r.offer ? 'server' : r.location.startsWith('smb://') ? 'share' : r.location.startsWith('sftp://') ? 'terminal' : r.location.startsWith('herakles') ? 'server' : 'usb',
+          r.name, r.offer ? r.location + ' — from the hub' : r.location, wz.repoMode === 'existing' && wz.repo === r.name, () => { wz.repoMode = 'existing'; wz.repo = r.name; render(); })),
         tile('plus', 'New location', 'A disk, a NAS, an SFTP server or a Herakles backup server.', wz.repoMode === 'new', () => { wz.repoMode = 'new'; render(); })));
+      const offer = wz.repoMode === 'existing' && repos.find(r => r.offer && r.name === wz.repo);
+      if (offer) out.push(h('div', { class: 'notice info' }, icon('server'), 'This repository is on the hub. When you create the job, the hub passes it to its attached servers, with its password: they need no credentials of their own. Pruning and checks run on the hub.'));
       if (wz.repoMode === 'new') {
         out.push(h('h3', {}, 'Kind of storage'), h('div', { class: 'tiles' },
           tile('usb', 'Local or USB disk', 'Also mounted network shares.', wz.type === 'local', () => { wz.type = 'local'; render(); }),
@@ -1543,6 +1629,12 @@ views.wizard = async main => {
           await api('POST', '/api/repos/' + encodeURIComponent(r.name) + '/init', { password: pw }, true);
           done.init = true;
         }
+      }
+      const offer = wz.repoMode === 'existing' && repos.find(r => r.offer && r.name === wz.repo);
+      if (offer) {
+        step = 'Passing the hub repository to the server';
+        say(step + '…');
+        await useHubRepo(offer.name);
       }
       step = 'Saving the job';
       say(step + '…');

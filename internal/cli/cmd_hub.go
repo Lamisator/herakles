@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"text/tabwriter"
 	"time"
@@ -111,31 +110,9 @@ code, so a server cannot be attached to an impostor.`,
 			if err != nil {
 				return err
 			}
-			if a.cfg.Agent.Hub != "" {
-				if cur, _ := hub.LoadCredentials(a.cfg.GetStateDir()); cur != nil {
-					return fmt.Errorf("already attached to %s as %s; run 'herakles hub leave' first", a.cfg.Agent.Hub, cur.Name)
-				}
-			}
-			if name != "" && code.Name == "" {
-				code.Name = name
-			}
-			ag := config.Agent{Hub: code.URL, CACert: caCert, InsecureSkipVerify: insecure}
 			c := a.cfg.Clone()
-			c.Agent = ag
-			if err := c.Validate(); err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), time.Minute)
-			defer cancel()
-			hello := hub.LocalHello(Version)
-			if name != "" {
-				hello.Hostname = name
-			}
-			creds, err := hub.Enroll(ctx, code, ag, hello)
+			creds, err := hub.Attach(cmd.Context(), c, code, config.Agent{CACert: caCert, InsecureSkipVerify: insecure}, name, Version)
 			if err != nil {
-				return err
-			}
-			if err := hub.SaveCredentials(c.GetStateDir(), creds); err != nil {
 				return err
 			}
 			if err := c.Save(); err != nil {
@@ -163,12 +140,11 @@ func (a *App) hubLeaveCmd() *cobra.Command {
 			}
 			c := a.cfg.Clone()
 			hubURL := c.Agent.Hub
-			c.Agent = config.Agent{}
-			kept := hub.Release(c)
-			if err := c.Save(); err != nil {
+			kept, err := hub.Detach(c)
+			if err != nil {
 				return err
 			}
-			if err := removeIfExists(hub.CredentialsPath(c.GetStateDir())); err != nil {
+			if err := c.Save(); err != nil {
 				return err
 			}
 			a.cfg = c
@@ -365,11 +341,4 @@ func (a *App) hubRenameCmd() *cobra.Command {
 			return st.Rename(s.ID, args[1])
 		},
 	}
-}
-
-func removeIfExists(p string) error {
-	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
 }

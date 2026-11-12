@@ -280,6 +280,7 @@ button.icon-only .ico { margin: 0; }
 .sys-repos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .notice { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; }
 .notice.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.notice.info { background: color-mix(in srgb, var(--accent-2) 10%, transparent); }
 @media (max-width: 760px) { .paths-cell { min-width: 160px; } .snap-details .kv { grid-template-columns: 1fr; } }
 .paths-cell { max-width: 320px; }
 .snap-table td.actions-cell, .snap-table th:last-child { position: sticky; right: 0; background: var(--panel); box-shadow: -8px 0 8px -8px rgba(20,30,50,.15); }

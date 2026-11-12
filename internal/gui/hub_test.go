@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -135,5 +136,106 @@ func TestWebHub(t *testing.T) {
 	}
 	if code, _, _ := c.do("GET", base+"/api/jobs", nil); code != 502 {
 		t.Fatal("removed server still reachable:", code)
+	}
+}
+
+// TestAttachFromWindow attaches a machine to a hub from its own window and
+// detaches it again; the hub itself cannot do that through the proxy.
+func TestAttachFromWindow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	cfg := config.New(filepath.Join(dir, "hub.yaml"))
+	cfg.StateDir = filepath.Join(dir, "state")
+	cfg.Daemon.ControlListen = "127.0.0.1:1"
+	cfg.Web = config.Web{Listen: "127.0.0.1:0", URL: "http://backup.test"}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	eng := engine.New(cfg, nil)
+	hb := hub.New(ctx, hub.OpenStore(hub.StorePath(cfg.StateDir)), eng.Log, eng.Config)
+	hs, err := newServer(ctx, eng, Options{Hub: hb, Web: &WebOptions{URL: "http://backup.test", Accounts: filepath.Join(dir, "state", "web", "accounts.json")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubSrv := httptest.NewServer(hs.Handler())
+	defer hubSrv.Close()
+
+	adir := t.TempDir()
+	acfg := config.New(filepath.Join(adir, "c.yaml"))
+	acfg.StateDir = filepath.Join(adir, "state")
+	acfg.Daemon.ControlListen = "127.0.0.1:1"
+	if err := acfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	aeng := engine.New(acfg, nil)
+	newWindow := func(agent bool) *client {
+		opts := Options{}
+		if agent {
+			opts.Agent = func() *hub.AgentState { return nil }
+		}
+		s, err := newServer(ctx, aeng, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		return &client{t: t, url: ts.URL, tok: s.Token()}
+	}
+	code, err := hb.Store.NewEnrollment(hubSrv.URL, "", time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tray := newWindow(false)
+	if c, body := tray.do("POST", "/api/hub/join", map[string]string{"code": code.Encode()}); c != 400 || !strings.Contains(string(body), "service") {
+		t.Fatal("a window without the service must refuse:", c, string(body))
+	}
+	var info map[string]any
+	tray.json("GET", "/api/info", nil, &info)
+	if info["can_attach"] != nil {
+		t.Fatal("can_attach without an agent")
+	}
+	w := newWindow(true)
+	w.json("GET", "/api/info", nil, &info)
+	if info["can_attach"] != true {
+		t.Fatal("can_attach missing")
+	}
+	if c, body := w.do("POST", "/api/hub/join", map[string]string{"code": "HKE1-garbage"}); c != 400 {
+		t.Fatal("bad code:", c, string(body))
+	}
+	var res map[string]any
+	if c := w.json("POST", "/api/hub/join", map[string]string{"code": code.Encode(), "name": "desk-1"}, &res); c != 200 || res["name"] != "desk-1" {
+		t.Fatal("join:", c, res)
+	}
+	saved, err := config.Load(acfg.Path())
+	if err != nil || saved.Agent.Hub != hubSrv.URL {
+		t.Fatal("agent.hub not saved:", err, saved.Agent)
+	}
+	if creds, _ := hub.LoadCredentials(acfg.StateDir); creds == nil || creds.Name != "desk-1" {
+		t.Fatal("login not stored:", creds)
+	}
+	if c, _ := w.do("POST", "/api/hub/join", map[string]string{"code": code.Encode()}); c != 400 {
+		t.Fatal("joining twice must fail:", c)
+	}
+	// The hub reaches this machine's API through NewRemote: no re-attaching.
+	remote := httptest.NewServer(NewRemote(ctx, aeng, Options{Service: true, Agent: func() *hub.AgentState { return nil }}))
+	defer remote.Close()
+	req, _ := http.NewRequest("POST", remote.URL+"/api/hub/leave", nil)
+	req.Header.Set(hub.RoleHeader, "admin")
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode < 400 {
+		t.Fatal("the hub must not detach a server through the proxy:", err, resp.StatusCode)
+	}
+	if c := w.json("POST", "/api/hub/leave", nil, &res); c != 200 {
+		t.Fatal("leave:", c)
+	}
+	saved, _ = config.Load(acfg.Path())
+	if saved.Agent.Hub != "" {
+		t.Fatal("agent.hub still set")
+	}
+	if creds, _ := hub.LoadCredentials(acfg.StateDir); creds != nil {
+		t.Fatal("login not removed")
+	}
+	if c, _ := w.do("POST", "/api/hub/leave", nil); c != 400 {
+		t.Fatal("leaving twice must fail:", c)
 	}
 }

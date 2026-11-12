@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,13 +48,17 @@ func TestServiceShare(t *testing.T) {
 	}
 	defer inst.Shutdown()
 
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
 	old := daemon.DesktopDir
 	daemon.DesktopDir = filepath.Join(dir, "desktop")
 	defer func() { daemon.DesktopDir = old }()
-	if err := daemon.WriteDesktopShare(os.Getuid(), os.Getgid(), daemon.DesktopShare{GUI: inst.Base, Token: inst.Token}); err != nil {
+	if err := daemon.WriteDesktopShare(me, daemon.DesktopShare{GUI: inst.Base, Token: inst.Token}); err != nil {
 		t.Fatal(err)
 	}
-	if fi, err := os.Stat(daemon.DesktopPath(os.Getuid())); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(daemon.DesktopPath(me.Uid)); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("share file: %v %v", fi, err)
 	}
 	sh, err := daemon.SharedDesktop()

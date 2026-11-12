@@ -1,9 +1,9 @@
 package hub
 
 import (
-	"crypto/ed25519"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"

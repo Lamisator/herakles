@@ -2,6 +2,7 @@ package gui
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -137,3 +138,66 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
+
+// agentRoutes attach this machine to a hub and detach it, from its own
+// window (the daemon runs the connection, so only where an agent runs).
+func (s *Server) agentRoutes(mux *http.ServeMux) {
+	ready := func(w http.ResponseWriter, r *http.Request) bool {
+		if !requireAdmin(w, r) {
+			return false
+		}
+		if s.agent == nil {
+			writeJSON(w, 400, apiError{Error: "only the Herakles service connects to a hub; open the service's window, or run 'herakles hub join' as administrator"})
+			return false
+		}
+		return true
+	}
+	mux.HandleFunc("POST /api/hub/join", func(w http.ResponseWriter, r *http.Request) {
+		if !ready(w, r) {
+			return
+		}
+		var req struct{ Code, Name string }
+		if err := decode(r, &req); err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		code, err := hub.ParseCode(req.Code)
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		c := s.eng.Config().Clone()
+		creds, err := hub.Attach(r.Context(), c, code, config.Agent{}, strings.TrimSpace(req.Name), s.version)
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		if err := s.saveConfig(c); err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"hub": code.URL, "name": creds.Name, "hub_key": hub.KeyFingerprint(code.HubKey)})
+	})
+	mux.HandleFunc("POST /api/hub/leave", func(w http.ResponseWriter, r *http.Request) {
+		if !ready(w, r) {
+			return
+		}
+		c := s.eng.Config().Clone()
+		if c.Agent.Hub == "" {
+			s.fail(w, errNotAttached, "")
+			return
+		}
+		kept, err := hub.Detach(c)
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		if err := s.saveConfig(c); err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"kept": nonNil(kept)})
+	})
+}
+
+var errNotAttached = errors.New("this machine is not attached to a hub")

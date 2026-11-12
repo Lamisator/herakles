@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,6 +17,7 @@ import (
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/daemon"
 	"github.com/lamisator/herakles/internal/gui"
+	"github.com/lamisator/herakles/internal/sysutil"
 	"github.com/lamisator/herakles/internal/tray"
 )
 
@@ -236,8 +236,5 @@ func (a *App) runServiceTray(ctx context.Context, sh *daemon.DesktopShare, openN
 	return nil
 }
 
-// processAlive reports whether pid runs (Unix; elsewhere always false).
-func processAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	return err == nil && p.Signal(syscall.Signal(0)) == nil
-}
+// processAlive reports whether pid runs.
+func processAlive(pid int) bool { return sysutil.ProcessAlive(pid) }

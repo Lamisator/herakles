@@ -403,3 +403,48 @@ func (a *Agent) handler() http.Handler {
 	mux.Handle("/", a.Handler)
 	return mux
 }
+
+// Attach enrolls this machine with code and prepares c for the hub: the
+// login goes into c's state directory and c.Agent is set to ag (whose Hub
+// becomes the code's URL). The caller saves c.
+func Attach(ctx context.Context, c *config.Config, code *Code, ag config.Agent, name, version string) (*Credentials, error) {
+	if c.Agent.Hub != "" {
+		if cur, _ := LoadCredentials(c.GetStateDir()); cur != nil {
+			return nil, fmt.Errorf("already attached to %s as %s; leave that hub first", c.Agent.Hub, cur.Name)
+		}
+	}
+	if name != "" && code.Name == "" {
+		code.Name = name
+	}
+	ag.Hub = code.URL
+	c.Agent = ag
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	hello := LocalHello(version)
+	if name != "" {
+		hello.Hostname = name
+	}
+	creds, err := Enroll(ctx, code, ag, hello)
+	if err != nil {
+		return nil, err
+	}
+	if err := SaveCredentials(c.GetStateDir(), creds); err != nil {
+		return nil, err
+	}
+	return creds, nil
+}
+
+// Detach removes the hub from c and deletes the login. The hub's
+// repositories stay as ordinary ones where jobs use them (returned). The
+// caller saves c.
+func Detach(c *config.Config) ([]string, error) {
+	c.Agent = config.Agent{}
+	kept := Release(c)
+	if err := os.Remove(CredentialsPath(c.GetStateDir())); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return kept, err
+	}
+	return kept, nil
+}

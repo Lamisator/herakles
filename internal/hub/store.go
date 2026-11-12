@@ -27,14 +27,14 @@ const TokenTTL = 24 * time.Hour
 
 // Server is an attached server as the hub knows it.
 type Server struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 	// PublicKey is the server's own identity key; it signs every login.
-	PublicKey []byte `json:"public_key"`
-	Created    time.Time `json:"created"`
-	LastSeen   time.Time `json:"last_seen,omitempty"`
-	Address    string    `json:"address,omitempty"`
-	Hello      Hello     `json:"hello"`
+	PublicKey []byte    `json:"public_key"`
+	Created   time.Time `json:"created"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	Address   string    `json:"address,omitempty"`
+	Hello     Hello     `json:"hello"`
 }
 
 // Hello describes an attached server; it reports it on every connection.

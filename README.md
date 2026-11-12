@@ -29,7 +29,7 @@ Everything is configured in one YAML file. You can edit it by hand, from the CLI
 | **Encryption** | AES‑256‑GCM for all data and metadata. Keyed HMAC‑SHA256 content IDs, so blob IDs leak nothing. The master key is wrapped with Argon2id using a **password, a key file, or both**. A repository can have several keys (add, remove, change). |
 | **Storage** | Local path, mounted NFS/CIFS share, UNC path, `smb://` (no mount needed), `sftp://` and `herakles://` (repository server). Upload and download bandwidth can be limited. |
 | **Client/server (optional)** | HTTPS repository server with bcrypt users, per‑user repository ACLs, **append‑only mode** (protects against ransomware deleting backups), quotas and a self‑signed certificate generator. The server never sees plaintext or keys. |
-| **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** and has a token‑protected local control API. |
+| **Scheduling** | The daemon runs cron schedules for each job (with a different backup type per schedule), retries, catch‑up of missed runs and scheduled prune/check per repository. It installs as a **systemd** or **Windows service** (on Windows with a setup, no console needed) and has a token‑protected local control API. |
 | **Reliability** | Repository locks (shared/exclusive, stale detection) and atomic writes. `check` verifies structure, and `check --read-data 10%` also downloads and verifies a sample of the data. `repair index` rebuilds the index from pack headers. Restores can be verified. Interrupted backups resume (indexes are written periodically). |
 | **Restore** | Full, partial (`snapshot:path`), include/exclude filters, overwrite policies, sparse files, `restore-device` back to a disk, `dump` of a file or a tar of a folder, `find` across all snapshots, `diff` between snapshots, and the GUI **explorer** (preview, search, multi-select) with downloads as ZIP, tar.gz or tar. |
 | **Databases** | A `databases:` section dumps PostgreSQL, MySQL/MariaDB, MongoDB and SQLite running on the host with their own tools (`pg_dump`, `mysqldump`/`mariadb-dump`, `mongodump`, `sqlite3`) while they keep running. The dumps are streamed straight into the snapshot (no temporary files) and deduplicated like everything else. `herakles databases restore` and the GUI load a dump back into the server, also into a new database next to the current one. |
@@ -55,7 +55,9 @@ It ships `/usr/bin/herakles`, a menu entry, shell completions and `herakles.serv
 * **Server**: starts the backup wizard in the terminal (`herakles tui --wizard`), then enables and starts `herakles.service`.
 * **Nothing**: install only and print the next steps.
 
-Without a terminal, or to skip the questions, set `HERAKLES_MODE=desktop|user|server|none` (and `HERAKLES_USER` if sudo did not set `SUDO_USER`): `curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo HERAKLES_MODE=server sh`. Binaries for all platforms are on the same site.
+On **Windows**, run `herakles-setup.exe` from the site: one setup for x64 and ARM64 that installs to *Program Files*, adds a Start menu entry and an uninstaller, and asks the same question without a console: **whole computer** (the Windows service backs up every file and whole disks; the user's Herakles window and tray icon open it; configuration in `%ProgramData%\Herakles`, readable only by administrators) or **only my own files**. It also takes a hub enrollment code. Unattended: `herakles-setup.exe /S /MODE=desktop|user|none [/HUB=HKE1-…] [/NAME=…] [/USER=DOMAIN\name] [/NOAUTOSTART] [/NOPATH]`; uninstall with `uninstall.exe /S [/PURGE]`. The setup is built with NSIS (`packaging/windows/`, `apt install nsis`); its steps after copying the files are `herakles windows-setup install|uninstall|restart`.
+
+On Linux, without a terminal, or to skip the questions, set `HERAKLES_MODE=desktop|user|server|none` (and `HERAKLES_USER` if sudo did not set `SUDO_USER`): `curl -fsSL https://herakles.kloeck-it.de/install.sh | sudo HERAKLES_MODE=server sh`. Binaries for all platforms are on the same site.
 
 To build it yourself you need Go 1.26 or newer:
 
@@ -165,7 +167,7 @@ After each backup, a job's `retention` policy is applied to that job's snapshots
 Run `herakles config example` to see a fully commented example with every option, or read [`internal/config/example.go`](internal/config/example.go). The default file location is:
 
 * Linux: `/etc/herakles/herakles.yaml` as root, otherwise `~/.config/herakles/herakles.yaml`
-* Windows: `%ProgramData%\Herakles\herakles.yaml` if it exists, otherwise `%APPDATA%\Herakles\herakles.yaml`
+* Windows: `%ProgramData%\Herakles\herakles.yaml` if it exists and you may read it (administrators, the service), otherwise `%APPDATA%\Herakles\herakles.yaml`
 * or set `--config` / `HERAKLES_CONFIG`
 
 Useful commands: `config validate`, `config show` (secrets redacted), `config edit` (opens `$EDITOR` and re‑validates), and `config set repo|job|remove …` for scripting. Saving from the TUI/GUI forms rewrites the file. The raw YAML editors in the TUI and GUI keep your comments.
@@ -377,6 +379,8 @@ sudo herakles hub join HKE1-eyJ1Ijoi…
 herakles hub status
 ```
 
+Instead of `hub join`, paste the code in the server's own Herakles window (**Configuration → Central management → Attach to the hub**, also **Leave the hub** there) or, on Windows, into the setup.
+
 The **enrollment code** is one string with everything the server needs: the hub's address, a one-time secret (valid 24 hours, `--valid`), the hub's public identity key, the name on the hub and — when the hub serves TLS itself (`web.tls_cert`) — a pin of its certificate, so a self-signed hub works without a CA file. A checksum catches copy errors.
 
 ```yaml
@@ -385,7 +389,7 @@ hub:
   repositories: [storagebox]   # passed to every attached server, with its password
 ```
 
-Shared repositories arrive on the servers as `hub: true` entries; their password (and key, SSH and CA files) go to `<state_dir>/hub/repositories/` (mode 0600), so no server needs credentials of its own and backups of all servers share one deduplicated store. Snapshots are kept apart by host name, retention groups by host, and pruning/checks of shared repositories run only on the hub (their maintenance schedule is not passed on). A repository of the server with the same name wins. `herakles hub leave` detaches a server and keeps the repositories as ordinary ones; `herakles hub servers|rename|remove` manage the servers on the hub.
+While a server is managed from the hub, its wizard and job editor also offer the hub's repositories; choosing one shares it before the job is saved. Shared repositories arrive on the servers as `hub: true` entries; their password (and key, SSH and CA files) go to `<state_dir>/hub/repositories/` (mode 0600), so no server needs credentials of its own and backups of all servers share one deduplicated store. Snapshots are kept apart by host name, retention groups by host, and pruning/checks of shared repositories run only on the hub (their maintenance schedule is not passed on). A repository of the server with the same name wins. `herakles hub leave` detaches a server and keeps the repositories as ordinary ones; `herakles hub servers|rename|remove` manage the servers on the hub.
 
 **Protocol.** The server makes its own Ed25519 key pair at enrollment and sends the public half with the secret; the hub stores only that and a hash of the used-up secret, and signs its answer with its identity key, which the server checks against the code. On every connection the server signs a login with a timestamp and nonce (replays and clocks off by more than 5 minutes are refused), and the hub signs the nonce back in the WebSocket handshake. HTTP requests then run over streams multiplexed on that WebSocket (yamux). Plain users of the hub get the same limits on the servers as on the hub; answers from servers are sandboxed so a server cannot run scripts in the hub's pages. **Whoever administers the hub controls the attached servers completely** (backups run as root and jobs can run hooks) — attach only servers the hub's administrators may control. A diagram is in the [guide](https://herakles.kloeck-it.de/guide.html#hub).
 
@@ -480,7 +484,9 @@ The suite covers:
 * Databases: dump plan, streaming into the snapshot, failed dumps left out, restore into a new database (fake tools); plus a manual run against real PostgreSQL 15, MariaDB 10.11, MongoDB 7 and SQLite (backup, in-place and side-by-side restore, roles, socket and password logins, server down).
 * Containers: detection, unavailable host disks, backup of `/` with kernel file systems skipped, the repository left out of its own backup; plus a manual run in a container on a real host (host disks refused with an explanation, a passed-in partition imaged, the whole container backed up, restored and compared).
 * Hub: enrollment codes (checksum, expiry, one-time use), signed enrollment and logins (impostor hub, wrong key, replay, old timestamps, removed server), a pinned self-signed hub certificate, passing repositories on (conflicts, removal, still-used ones), the forwarded GUI API with roles and sandboxed answers; plus a run with two daemons and the wizard, a backup and the explorer driven through the hub in a browser.
+* Hub from the GUI: attaching and leaving in a server's own window (refused through the hub's proxy and without the service), plus a browser run: attach from the window, the hub's repository offered in the managed server's wizard, a backup into it, leave.
 * Desktop sharing of the system service: share file, status, one-time login tickets.
+* Windows setup: unattended and interactive installs (whole computer, own files, install only), upgrade and uninstall, run under Wine (service, shared window, tray autostart, PATH, Start menu entry, Add/Remove Programs).
 * Tray mode: daemon and GUI sharing one runner, second-start handover, and the tray icon itself over a private D‑Bus session against a fake panel (registration after a late panel start, icon, tooltip, menu, Open, left click, Quit).
 
 ## Current limitations

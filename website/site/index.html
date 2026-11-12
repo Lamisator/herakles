@@ -152,8 +152,9 @@ verified 1180 files</pre>
       <tr data-os="linux-amd64"><td>Linux, x86‑64 <span class="muted">(PCs, servers, most NAS)</span></td><td><a class="file" href="downloads/herakles-linux-amd64" download>herakles-linux-amd64</a></td><td>@SIZE_herakles-linux-amd64@</td><td class="sum">@SHA_herakles-linux-amd64@</td></tr>
       <tr data-os="linux-arm64"><td>Linux, ARM64 <span class="muted">(Raspberry Pi 4/5, ARM NAS)</span></td><td><a class="file" href="downloads/herakles-linux-arm64" download>herakles-linux-arm64</a></td><td>@SIZE_herakles-linux-arm64@</td><td class="sum">@SHA_herakles-linux-arm64@</td></tr>
       <tr data-os="linux-armv7"><td>Linux, ARMv7 32‑bit <span class="muted">(older Pi and NAS)</span></td><td><a class="file" href="downloads/herakles-linux-armv7" download>herakles-linux-armv7</a></td><td>@SIZE_herakles-linux-armv7@</td><td class="sum">@SHA_herakles-linux-armv7@</td></tr>
-      <tr data-os="windows-amd64"><td>Windows, x64</td><td><a class="file" href="downloads/herakles-windows-amd64.exe" download>herakles-windows-amd64.exe</a></td><td>@SIZE_herakles-windows-amd64.exe@</td><td class="sum">@SHA_herakles-windows-amd64.exe@</td></tr>
-      <tr data-os="windows-arm64"><td>Windows, ARM64</td><td><a class="file" href="downloads/herakles-windows-arm64.exe" download>herakles-windows-arm64.exe</a></td><td>@SIZE_herakles-windows-arm64.exe@</td><td class="sum">@SHA_herakles-windows-arm64.exe@</td></tr>
+      <tr data-os="windows-setup"><td>Windows <span class="muted">(setup for x64 and ARM64: service, tray icon, uninstaller)</span></td><td><a class="file" href="downloads/herakles-setup.exe" download>herakles-setup.exe</a></td><td>@SIZE_herakles-setup.exe@</td><td class="sum">@SHA_herakles-setup.exe@</td></tr>
+      <tr data-os="windows-amd64"><td>Windows, x64 <span class="muted">(single file, no setup)</span></td><td><a class="file" href="downloads/herakles-windows-amd64.exe" download>herakles-windows-amd64.exe</a></td><td>@SIZE_herakles-windows-amd64.exe@</td><td class="sum">@SHA_herakles-windows-amd64.exe@</td></tr>
+      <tr data-os="windows-arm64"><td>Windows, ARM64 <span class="muted">(single file, no setup)</span></td><td><a class="file" href="downloads/herakles-windows-arm64.exe" download>herakles-windows-arm64.exe</a></td><td>@SIZE_herakles-windows-arm64.exe@</td><td class="sum">@SHA_herakles-windows-arm64.exe@</td></tr>
       <tr data-os="macos-arm64"><td>macOS, Apple Silicon <span class="muted">(experimental, no tray icon)</span></td><td><a class="file" href="downloads/herakles-macos-arm64" download>herakles-macos-arm64</a></td><td>@SIZE_herakles-macos-arm64@</td><td class="sum">@SHA_herakles-macos-arm64@</td></tr>
     </table>
     </div>
@@ -182,6 +183,10 @@ sudo install -m 755 herakles-linux-amd64 /usr/local/bin/herakles
 herakles tray --open</pre>
     </div>
     <div class="os-panel" data-panel="windows" hidden>
+      <p>Download <a href="downloads/herakles-setup.exe" download><code>herakles-setup.exe</code></a> and run it. It installs Herakles for x64 and ARM64 Windows and asks how you use it: for the <strong>whole computer</strong> (a Windows service backs up every file and whole disks, also when nobody is logged in; the Herakles window opens it) or <strong>only your own files</strong>. An enrollment code from a <a href="guide.html#hub">hub</a> attaches the computer right away. The backup wizard in the Herakles window does the rest; no console needed. Uninstall it under <em>Settings → Apps</em>.</p>
+<pre><span class="c"># unattended, e.g. from a deployment tool (see the guide for all options)</span>
+herakles-setup.exe /S /MODE=desktop /HUB=HKE1-…</pre>
+      <p style="color:var(--muted)">Without the setup, the single file works too:</p>
 <pre><span class="c"># PowerShell: download, check, put it somewhere permanent</span>
 mkdir $env:LOCALAPPDATA\Herakles -Force
 cd $env:LOCALAPPDATA\Herakles
@@ -189,7 +194,7 @@ Invoke-WebRequest https://herakles.kloeck-it.de/downloads/herakles-windows-amd64
 (Get-FileHash herakles.exe).Hash   <span class="c"># compare with SHA256SUMS</span>
 
 .\herakles.exe tray --open</pre>
-      <p style="color:var(--muted)">Windows SmartScreen may warn about an unknown publisher the first time, because the file is not code-signed. Choose <em>More info → Run anyway</em>.</p>
+      <p style="color:var(--muted)">Windows SmartScreen may warn about an unknown publisher the first time, because the setup and the program are not code-signed. Choose <em>More info → Run anyway</em>.</p>
     </div>
     <div class="os-panel" data-panel="macos" hidden>
 <pre>curl -LO https://herakles.kloeck-it.de/downloads/herakles-macos-arm64
@@ -214,7 +219,7 @@ herakles gui</pre>
   // Highlight the download that fits this browser's system.
   const ua = navigator.userAgent, pf = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
   let os = null;
-  if (/Win/i.test(pf) || /Windows/i.test(ua)) os = /ARM|aarch64/i.test(ua) ? 'windows-arm64' : 'windows-amd64';
+  if (/Win/i.test(pf) || /Windows/i.test(ua)) os = 'windows-setup';
   else if (/Mac/i.test(pf) || /Mac OS X/i.test(ua)) os = 'macos-arm64';
   else if (/Linux|X11/i.test(pf + ua) && !/Android/i.test(ua)) os = /aarch64|arm64/i.test(pf + ua) ? 'linux-arm64' : /armv7|armv8l/i.test(pf + ua) ? 'linux-armv7' : 'linux-amd64';
   const row = os && document.querySelector('tr[data-os="' + os + '"]');

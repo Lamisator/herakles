@@ -25,6 +25,7 @@ import (
 	"github.com/lamisator/herakles/internal/compress"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/retention"
+	"github.com/lamisator/herakles/internal/sysutil"
 )
 
 // Config is the root of the configuration file.
@@ -349,10 +350,10 @@ func (d Daemon) IsZero() bool { return d == Daemon{} }
 type GUI struct {
 	Listen      string `yaml:"listen,omitempty" json:"listen,omitempty"`
 	OpenBrowser *bool  `yaml:"open_browser,omitempty" json:"open_browser,omitempty"`
-	// Users are local accounts the system service (running as root) shares
-	// its GUI with: their tray icon and "Herakles" menu entry open the
-	// service instead of running Herakles as that user. They get full
-	// control over the service, restores included (Linux).
+	// Users are local accounts the system service (root, or LocalSystem on
+	// Windows) shares its GUI with: their tray icon and "Herakles" menu
+	// entry open the service instead of running Herakles as that user. They
+	// get full control over the service, restores included.
 	Users []string `yaml:"users,omitempty" json:"users,omitempty"`
 }
 
@@ -472,10 +473,12 @@ func DefaultPath() string {
 		return p
 	}
 	if runtime.GOOS == "windows" {
-		// A system-wide file (used by the Windows service) takes precedence.
-		if pd := os.Getenv("ProgramData"); pd != "" {
-			p := filepath.Join(pd, "Herakles", "herakles.yaml")
-			if _, err := os.Stat(p); err == nil {
+		// A system-wide file (used by the Windows service) takes precedence
+		// for whoever may read it: administrators. The setup locks it away
+		// from other users, who get their own file.
+		if p := SystemPath(); p != "" {
+			if f, err := os.Open(p); err == nil {
+				f.Close()
 				return p
 			}
 		}
@@ -491,6 +494,15 @@ func DefaultPath() string {
 		return filepath.Join(d, "herakles", "herakles.yaml")
 	}
 	return "herakles.yaml"
+}
+
+// SystemPath is the Windows service's configuration file
+// (%ProgramData%\Herakles\herakles.yaml); empty elsewhere.
+func SystemPath() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	return filepath.Join(sysutil.ProgramData(), "Herakles", "herakles.yaml")
 }
 
 // DefaultStateDir returns the default directory for runtime state.

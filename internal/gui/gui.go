@@ -277,6 +277,8 @@ func decode(r *http.Request, v any) error {
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := s.apiMux()
+	// Not part of apiMux: a hub must not re-attach a server it manages.
+	s.agentRoutes(mux)
 	static, _ := fs.Sub(assets, "static")
 	mux.Handle("GET /", http.FileServer(http.FS(static)))
 	if s.web != nil {
@@ -478,6 +480,7 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		out["hub"] = true
 	}
 	if s.agent != nil {
+		out["can_attach"] = true
 		if st := s.agent(); st != nil {
 			out["agent"] = st
 		}

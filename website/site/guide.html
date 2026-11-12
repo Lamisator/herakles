@@ -125,15 +125,27 @@ sha256sum -c --ignore-missing SHA256SUMS
 sudo install -m 755 herakles-linux-amd64 /usr/local/bin/herakles
 herakles version</pre>
 <p>Not sure which file? Run <code>uname -m</code>: <code>x86_64</code> means amd64, <code>aarch64</code> means arm64, <code>armv7l</code> means armv7.</p>
-<h3>Windows</h3>
-<p>Download <code>herakles-windows-amd64.exe</code> (or <code>-arm64</code>), rename it to <code>herakles.exe</code> and move it to a permanent folder such as <code>C:\Program Files\Herakles</code>. If you plan to install the Windows service, the file must stay where it is. To call it from any terminal, add the folder to your <code>PATH</code>.</p>
+<h3 id="windows-setup">Windows</h3>
+<p>Download <code>herakles-setup.exe</code> and run it. One setup covers x64 and ARM64 Windows; it installs to <code>C:\Program Files\Herakles</code>, adds “Herakles” to the Start menu and an uninstaller to <em>Settings → Apps</em>, and asks how Herakles is used:</p>
+<ul>
+<li><b>Whole computer</b> (recommended): backups run in the Windows service as LocalSystem, so they reach every file and whole disks, also when nobody is logged in. The Herakles window and tray icon of the user who installed it open the service. The configuration goes to <code>%ProgramData%\Herakles\herakles.yaml</code>, a folder only administrators and the service can read, because it holds repository passwords. An optional <a href="#hub">hub</a> enrollment code attaches the computer right away.</li>
+<li><b>Only my own files</b>: Herakles runs as you while you are logged in, with your configuration in <code>%APPDATA%\Herakles</code>.</li>
+<li><b>Install only</b>.</li>
+</ul>
+<p>It can also add Herakles to the <code>PATH</code> and start the tray icon at login. After that, the backup wizard in the Herakles window sets up the first backup; no console is needed. Running a newer setup updates Herakles and restarts the service, keeping all settings. Uninstalling removes the service, autostart and PATH entries; it keeps the configuration unless you tick “Delete the service's configuration and logs” (your backups in the repositories are never touched). For other users of the computer: <code>herakles daemon desktop on --user NAME</code> in an administrator terminal.</p>
+<p>Unattended installation, for example from a deployment tool:</p>
+<pre>herakles-setup.exe /S /MODE=desktop               <span class="c"># desktop = whole computer, user = own files, none</span>
+herakles-setup.exe /S /MODE=desktop /HUB=HKE1-… /NAME=office-pc /USER=CORP\alex
+herakles-setup.exe /S /NOAUTOSTART /NOPATH /D=D:\Apps\Herakles
+"C:\Program Files\Herakles\uninstall.exe" /S [/PURGE]</pre>
+<p><code>/USER</code> names the account whose window opens the service (default: the user logged in to the session). The setup and the program are not code-signed yet, so SmartScreen may warn about an unknown publisher: choose <em>More info → Run anyway</em>.</p>
+<p>Without the setup, the single file works as well: download <code>herakles-windows-amd64.exe</code> (or <code>-arm64</code>), rename it to <code>herakles.exe</code> and move it to a permanent folder such as <code>C:\Program Files\Herakles</code>. If you plan to install the Windows service, the file must stay where it is. To call it from any terminal, add the folder to your <code>PATH</code>.</p>
 <pre>(Get-FileHash .\herakles.exe).Hash      <span class="c"># compare with SHA256SUMS</span>
 .\herakles.exe version</pre>
-<p>SmartScreen may warn about an unknown publisher because the file is not code-signed: choose <em>More info → Run anyway</em>.</p>
 <h3>macOS (experimental)</h3>
 <p>The Apple Silicon build has not been tested on a Mac yet. CLI, terminal UI and GUI are expected to work; the tray icon is not available. Remove the download quarantine with <code>xattr -d com.apple.quarantine herakles-macos-arm64</code>.</p>
 <h3>Updating and removing</h3>
-<p>Packages update with the system. For the single file, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
+<p>Packages update with the system, the Windows setup by running a newer setup. For the single file, replace the file and restart whatever runs it (the tray, or <code>herakles daemon restart</code> for the service). Repositories and configuration stay compatible. To remove Herakles, run <code>herakles tray autostart off</code> and <code>herakles daemon uninstall</code> if you used them, then delete the file. With the Windows setup, use <em>Settings → Apps</em> instead. Your configuration lives in the file shown by <code>herakles config path</code>; your backups stay in their repositories.</p>
 
 <h2 id="quick-start">Quick start</h2>
 <h3 id="qs-gui">With the desktop interface</h3>
@@ -278,7 +290,7 @@ herakles key remove --repo usb-disk &lt;KEY-ID&gt;</pre>
   <li><code>devices</code>: whole disks or partitions as raw images, for example <code>/dev/sda1</code>, <code>/dev/nvme0n1</code>, <code>\\.\C:</code> or <code>\\.\PhysicalDrive0</code>. See <a href="#disks">disks and partitions</a>.</li>
   <li><code>tags</code>: labels added to every snapshot of the job, useful for filtering and for <code>keep_tags</code>.</li>
 </ul>
-<p>Backing up system folders or other users' files needs root (Linux) or administrator rights (Windows); use the system service for that. On a Linux desktop, <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> lets you set it up from the normal Herakles window.</p>
+<p>Backing up system folders or other users' files needs root (Linux) or administrator rights (Windows); use the system service for that. On a Linux desktop, <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> lets you set it up from the normal Herakles window; on Windows, the setup's “Whole computer” option does the same.</p>
 <h3 id="excludes">Exclusions</h3>
 <table>
 <tr><th>Option</th><th>Example</th><th>Effect</th></tr>
@@ -394,7 +406,7 @@ herakles daemon start --user
 loginctl enable-linger $USER       <span class="c"># keep user services running without a login</span></pre>
 <p>As root, the configuration is <code>/etc/herakles/herakles.yaml</code> and state goes to <code>/var/lib/herakles</code>. The service is registered with the configuration file you used when installing it (<code>--config</code> works too). Logs: <code>herakles daemon logs</code> or <code>journalctl -u herakles</code>.</p>
 <h4>Windows service</h4>
-<p>Open a terminal <strong>as administrator</strong>, put the configuration in <code>%ProgramData%\Herakles\herakles.yaml</code> (Herakles prefers this file when it exists) and run:</p>
+<p>The <a href="#windows-setup">setup</a> does this for you (“Whole computer”). By hand: open a terminal <strong>as administrator</strong>, put the configuration in <code>%ProgramData%\Herakles\herakles.yaml</code> (Herakles prefers this file when it exists) and run:</p>
 <pre>herakles daemon install
 herakles daemon start
 herakles daemon status</pre>
@@ -451,7 +463,7 @@ herakles dump latest:/home/alex/projects --tar &gt; projects.tar</pre>
 
 <h2 id="disks">Disks and partitions</h2>
 <p>Herakles can image whole devices block by block. Unused, zeroed areas deduplicate and compress to almost nothing, and later images only store changed blocks.</p>
-<p>Reading a device needs root (Linux) or administrator rights (Windows). On a Linux desktop, run <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> once: the Herakles window then belongs to the system service, and disk backups set up there just work.</p>
+<p>Reading a device needs root (Linux) or administrator rights (Windows). On a Linux desktop, run <a href="#desktop-service"><code>sudo herakles daemon desktop on</code></a> once (on Windows, choose “Whole computer” in the setup): the Herakles window then belongs to the system service, and disk backups set up there just work.</p>
 <pre>sudo herakles backup --repo offsite --device /dev/sda1              <span class="c"># ad hoc</span>
 <span class="c"># or in a job:  devices: [/dev/nvme0n1]</span>
 
@@ -742,8 +754,13 @@ herakles dump latest /herakles-databases/postgres/shop.sql &gt; shop.sql   <span
 <h3 id="hub-enroll">Attaching a server</h3>
 <ol>
 <li>On the hub, open <b>Servers → Enroll a server</b> (or run <code>herakles hub enroll --name web-1</code>). You get a one-time <b>enrollment code</b>.</li>
-<li>Install Herakles on the server as a <a href="#service">system service</a> (<code>install.sh</code>: choose “server”).</li>
-<li>Run the command shown, as root:</li>
+<li>Install Herakles on the server as a <a href="#service">system service</a> (<code>install.sh</code>: choose “server”; Windows: the <a href="#windows-setup">setup</a> with “Whole computer”).</li>
+<li>Attach it with the code, in one of three ways:
+<ul>
+<li>in the server's Herakles window (or its web interface): <b>Configuration → Central management</b>, paste the code, <b>Attach to the hub</b>;</li>
+<li>on Windows, paste the code into the setup (or <code>herakles-setup.exe /S /HUB=HKE1-…</code>);</li>
+<li>or run the command shown, as root:</li>
+</ul></li>
 </ol>
 <pre>sudo herakles hub join HKE1-eyJ1IjoiaHR0cHM6Ly9iYWNrdXAuZXhhbXBsZS5jb20iLCJzIjoi…
 <span class="c"># attached to https://backup.example.com as "web-1" (hub key 0225:7f9b:…)</span>
@@ -756,11 +773,11 @@ herakles hub status</pre>
 <pre>herakles hub servers                    <span class="c"># NAME  ID  STATE  HOST  SYSTEM  VERSION  LAST SEEN</span>
 herakles hub rename web-1 web-frontend
 herakles hub remove web-frontend        <span class="c"># it can no longer connect</span>
-sudo herakles hub leave                 <span class="c"># on the server: detach it</span></pre>
+sudo herakles hub leave                 <span class="c"># on the server: detach it (or Configuration → Leave the hub)</span></pre>
 <p>A removed or detached server keeps running its backups on its own. Update hub and servers together; the Servers page marks servers with another version.</p>
 
 <h3 id="hub-repos">Shared repositories</h3>
-<p>Under <b>Servers → Repositories for all servers</b> (or in the configuration), pick the hub's repositories that every server should use:</p>
+<p>While you manage a server, its backup wizard and job editor also offer the hub's repositories (“from the hub”). Choosing one there shares it: the hub passes it on before the job is saved. You can also pick them in advance under <b>Servers → Repositories for all servers</b>, or in the configuration:</p>
 <pre>hub:
   repositories: [storagebox]</pre>
 <p>They are passed to each server <b>with their passwords</b> on every connection and after every change, so there is one password to keep and the servers need no credentials of their own. On a server they appear with “from the hub” and cannot be edited there; the password (and key, SSH and CA files) are stored in <code>&lt;state_dir&gt;/hub/repositories/</code> with mode 0600. Several servers backing up into one repository share one deduplicated store: their snapshots are kept apart by host name (see <b>Systems</b>), retention groups by host, and pruning and checks of a shared repository run only on the hub. A repository of the server with the same name wins over the hub's. When a repository is no longer shared, it is removed from the servers, unless a job there still uses it.</p>

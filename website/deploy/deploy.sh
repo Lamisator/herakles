@@ -6,6 +6,7 @@
 #
 # Commit first: the version shown on the site is `git describe --tags`.
 # BUILD_ONLY=1 only builds website/build for a local preview.
+# The Windows setup needs makensis (apt install nsis).
 # Binaries are only uploaded when they changed; older versions stay
 # available under /downloads/<version>/. On release tags the signed Linux
 # packages and apt/rpm/pacman repositories are rebuilt (packaging/build.sh)
@@ -29,6 +30,8 @@ fi
 echo "== building binaries ($VERSION)"
 rm -rf dist
 make dist VERSION="$VERSION" >/dev/null
+echo "== building the Windows setup"
+packaging/windows/build.sh "$VERSION" dist "dist/herakles-$VERSION-windows-setup.exe"
 
 build=website/build
 rm -rf "$build"
@@ -42,6 +45,7 @@ declare -A names=(
   [linux-arm]=herakles-linux-armv7
   [windows-amd64.exe]=herakles-windows-amd64.exe
   [windows-arm64.exe]=herakles-windows-arm64.exe
+  [windows-setup.exe]=herakles-setup.exe
   [darwin-arm64]=herakles-macos-arm64
 )
 subst=(-e "s/@VERSION@/$VERSION/g")

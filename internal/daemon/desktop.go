@@ -6,17 +6,20 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/lamisator/herakles/internal/sysutil"
 )
 
 // DesktopDir holds one file per local user the system service shares its
-// GUI with (gui.users), named after the user ID and readable only by that
-// user. 'herakles tray' and 'herakles gui' look for it before starting
-// Herakles as the user.
-var DesktopDir = "/run/herakles/desktop"
+// GUI with (gui.users), named after the user's ID (uid, or SID on Windows)
+// and readable only by that user. 'herakles tray' and 'herakles gui' look
+// for it before starting Herakles as the user.
+var DesktopDir = defaultDesktopDir()
 
 // DesktopShare is what a shared user may use: the GUI address and its
 // session token.
@@ -28,33 +31,42 @@ type DesktopShare struct {
 }
 
 // DesktopPath is the share file of a user ID.
-func DesktopPath(uid int) string { return filepath.Join(DesktopDir, strconv.Itoa(uid)+".json") }
+func DesktopPath(id string) string { return filepath.Join(DesktopDir, id+".json") }
 
-// WriteDesktopShare writes the share file for uid, owned by uid:gid and
-// readable only by them.
-func WriteDesktopShare(uid, gid int, s DesktopShare) error {
+// CanShareDesktop reports whether this process may serve its GUI to other
+// users: the system service (root, or elevated / LocalSystem on Windows).
+func CanShareDesktop() bool {
+	return (runtime.GOOS == "linux" || runtime.GOOS == "windows") && sysutil.Elevated()
+}
+
+// WriteDesktopShare writes the share file for u, readable only by them.
+func WriteDesktopShare(u *user.User, s DesktopShare) error {
 	if err := os.MkdirAll(DesktopDir, 0o755); err != nil {
 		return err
 	}
+	if err := sysutil.SecureDir(DesktopDir); err != nil {
+		return err
+	}
 	b, _ := json.Marshal(s)
-	p := DesktopPath(uid)
+	p := DesktopPath(u.Uid)
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	if err := os.Chown(tmp, uid, gid); err != nil {
+	if err := grantShare(tmp, u); err != nil {
 		os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, p)
 }
 
-// RemoveDesktopShares removes all share files except those of keep.
-func RemoveDesktopShares(keep map[int]bool) {
+// RemoveDesktopShares removes all share files except those of keep (user
+// IDs).
+func RemoveDesktopShares(keep map[string]bool) {
 	ents, _ := os.ReadDir(DesktopDir)
 	for _, e := range ents {
-		id, err := strconv.Atoi(strings.TrimSuffix(e.Name(), ".json"))
-		if err != nil || !strings.HasSuffix(e.Name(), ".json") || keep[id] {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || keep[id] {
 			continue
 		}
 		os.Remove(filepath.Join(DesktopDir, e.Name()))
@@ -62,14 +74,14 @@ func RemoveDesktopShares(keep map[int]bool) {
 }
 
 // SharedDesktop returns the system service's GUI if it is shared with the
-// current user and answers. Root never uses a share: it runs Herakles
-// itself.
+// current user and answers. Root (LocalSystem) never uses a share: it runs
+// Herakles itself.
 func SharedDesktop() (*DesktopShare, error) {
-	uid := os.Getuid()
-	if uid <= 0 {
+	id, ok := sysutil.SelfID()
+	if !ok {
 		return nil, ErrNotRunning
 	}
-	b, err := os.ReadFile(DesktopPath(uid))
+	b, err := os.ReadFile(DesktopPath(id))
 	if err != nil {
 		return nil, ErrNotRunning
 	}
