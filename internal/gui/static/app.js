@@ -2028,8 +2028,8 @@ views.servers = async main => {
         } }, 'Remove') : null)));
     if (x.online) {
       localApi('GET', '/api/hub/servers/' + encodeURIComponent(x.id) + '/api/jobs').then(jobs => {
-        clear(jobsBox).append(jobs.length ? jobs.map(j => h('span', { class: 'chip', title: j.last && j.last.error ? j.last.error : (j.last ? 'last run ' + ago(j.last.start) : 'never run') },
-          icon(jobIcon(j)), j.name, ' ', h('span', { class: 'badge ' + (j.active ? 'running' : (j.last && j.last.status) || '') }, j.active ? 'running' : (j.last && j.last.status) || 'never run'))) : 'No backup jobs yet.');
+        clear(jobsBox).append(...(jobs.length ? jobs.map(j => h('span', { class: 'chip', title: j.last && j.last.error ? j.last.error : (j.last ? 'last run ' + ago(j.last.start) : 'never run') },
+          icon(jobIcon(j)), j.name, ' ', h('span', { class: 'badge ' + (j.active ? 'running' : (j.last && j.last.status) || '') }, j.active ? 'running' : (j.last && j.last.status) || 'never run'))) : ['No backup jobs yet.']));
       }).catch(e => clear(jobsBox).append(e.message));
     }
   }
