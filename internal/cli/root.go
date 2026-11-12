@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/inconshreveable/mousetrap"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -60,6 +61,12 @@ func Execute() int {
 	archiver.Version = Version
 	app := &App{out: os.Stdout, err: os.Stderr, in: os.Stdin}
 	root := app.rootCommand()
+	// Double-clicked in Explorer (Windows): open the GUI instead of
+	// printing help into a console window that closes at once.
+	cobra.MousetrapHelpText = ""
+	if len(os.Args) == 1 && mousetrap.StartedByExplorer() {
+		root.SetArgs([]string{"tray", "--open"})
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := root.ExecuteContext(ctx); err != nil {

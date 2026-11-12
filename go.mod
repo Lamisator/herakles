@@ -12,6 +12,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/hirochachacha/go-smb2 v1.1.0
+	github.com/inconshreveable/mousetrap v1.1.0
 	github.com/kardianos/service v1.3.0
 	github.com/klauspost/compress v1.20.4
 	github.com/pkg/sftp v1.13.12
@@ -40,7 +41,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
