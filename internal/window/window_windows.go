@@ -26,7 +26,15 @@ func Open(url string) error {
 		return err
 	}
 	cmd := withURL(exec.Command(exe, "window"), url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	// CREATE_NO_WINDOW: no console. Not HideWindow: Windows would apply
+	// SW_HIDE to the Herakles window's first ShowWindow.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	if f := logFile(); f != nil {
+		defer f.Close()
+		cmd.Stdout, cmd.Stderr = f, f
+	}
+	// The tray was clicked, so it may bring the new window to the front.
+	allowSetForeground.Call(^uintptr(0)) // ASFW_ANY
 	return start(cmd)
 }
 
@@ -37,11 +45,13 @@ func Available() bool {
 }
 
 var (
-	shell32       = windows.NewLazySystemDLL("shell32.dll")
-	user32        = windows.NewLazySystemDLL("user32.dll")
-	extractIconEx = shell32.NewProc("ExtractIconExW")
-	sendMessage   = user32.NewProc("SendMessageW")
-	setForeground = user32.NewProc("SetForegroundWindow")
+	shell32            = windows.NewLazySystemDLL("shell32.dll")
+	user32             = windows.NewLazySystemDLL("user32.dll")
+	extractIconEx      = shell32.NewProc("ExtractIconExW")
+	sendMessage        = user32.NewProc("SendMessageW")
+	setForeground      = user32.NewProc("SetForegroundWindow")
+	showWindow         = user32.NewProc("ShowWindow")
+	allowSetForeground = user32.NewProc("AllowSetForegroundWindow")
 )
 
 // Show shows url in a native window and returns when it is closed. It must
@@ -65,6 +75,10 @@ func Show(url string) error {
 	defer w.Destroy()
 	hwnd := uintptr(w.Window())
 	setIcon(hwnd)
+	// Show it again in case the first ShowWindow took a hidden or minimised
+	// state from the starting process.
+	const swShowNormal = 1
+	showWindow.Call(hwnd, swShowNormal)
 	setForeground.Call(hwnd)
 	w.Navigate(url)
 	w.Run()
@@ -92,4 +106,18 @@ func setIcon(hwnd uintptr) {
 	if small != 0 {
 		sendMessage.Call(hwnd, wmSetIcon, 0, small)
 	}
+}
+
+// logFile is window.log in Herakles' state folder: what the window process
+// reports, since it has no console.
+func logFile() *os.File {
+	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "Herakles")
+	if os.MkdirAll(dir, 0o700) != nil {
+		return nil
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "window.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil
+	}
+	return f
 }
