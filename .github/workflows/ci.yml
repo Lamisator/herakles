@@ -1,7 +1,9 @@
 name: CI
 
+# Branch pushes only: a release tag points at a commit that was just tested.
 on:
   push:
+    branches: ['**']
   pull_request:
 
 jobs:
@@ -12,8 +14,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: Vet
@@ -26,16 +28,23 @@ jobs:
         run: go test -run TrayOverDBus ./internal/tray
       - name: Test
         if: runner.os == 'Windows'
-        run: go test ./...
+        shell: bash
+        # Failing tests become annotations, readable without logging in.
+        run: |
+          go test ./... 2>&1 | tee test.log; rc=${PIPESTATUS[0]}
+          if [ $rc != 0 ]; then
+            grep -E -- '--- FAIL|^FAIL|panic:|_test.go:[0-9]+:' test.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done
+          fi
+          exit $rc
 
   build:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: make dist
