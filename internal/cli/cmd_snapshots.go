@@ -100,7 +100,9 @@ func (a *App) lsCmd() *cobra.Command {
 		Short: "List files in a snapshot",
 		Example: `  herakles ls latest
   herakles ls 3fa2b1c9 /home/alice -l
-  herakles ls latest:/etc --recursive`,
+  herakles ls latest:/etc --recursive
+  herakles ls latest:/dev/sda                 # partitions of a disk image
+  herakles ls latest:/dev/sda/part2/etc -l    # files inside it`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -118,6 +120,15 @@ func (a *App) lsCmd() *cobra.Command {
 				return err
 			}
 			node, err := repo.FindNode(ctx, snap.Tree, p)
+			if err != nil || node.Type == repository.NodeDevice {
+				img, inner, ierr := imageAt(ctx, repo, snap, p)
+				if img != nil {
+					return a.lsImage(img, p, inner, long, recursive)
+				}
+				if ierr != nil {
+					err = ierr
+				}
+			}
 			if err != nil {
 				return err
 			}

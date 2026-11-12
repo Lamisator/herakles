@@ -272,6 +272,8 @@ herakles key passwd --repo usb-disk                 <span class="c"># change the
 herakles key remove --repo usb-disk &lt;KEY-ID&gt;</pre>
 <div class="note warn"><p>If all passwords and key files of a repository are lost, the data cannot be recovered. There is no back door.</p></div>
 
+<p>On the <b>Repositories</b> page, every repository has a bar of its storage: the space this repository takes, other data on the same disk, share or server, and what is free (on a Herakles server with a quota: the quota). It needs no password; <code>herakles stats</code> shows the free space too. SFTP servers report their capacity only when they offer the <code>statvfs</code> extension (OpenSSH does).</p>
+
 <h3 id="repo-options">Repository options</h3>
 <table>
 <tr><th>Option</th><th>Meaning</th></tr>
@@ -493,6 +495,20 @@ DEVICE                      SIZE        DESCRIPTION                             
   /dev/sdb1                 28.90 GiB   partition · exfat "STICK"                     /dev/disk/by-id/usb-SanDisk_Ultra_Fit_4C53…-part1</pre>
 <p>Jobs store the <strong>stable path</strong>: <code>/dev/sdb1</code> can become <code>/dev/sdc1</code> after a reboot or when another disk is plugged in, the <code>by-id</code> name cannot. Devices marked <em>system</em> hold the running system (/, /boot, swap) and change while they are read. On Windows the list shows <code>\\.\C:</code> volumes and <code>\\.\PhysicalDrive0</code> disks; reading them needs an administrator terminal.</p>
 <div class="note"><p><strong>Consistency:</strong> an image of a mounted, changing file system can be inconsistent. Back up unmounted or read-only file systems, or create an LVM, ZFS or btrfs snapshot in a <a href="#hooks"><code>before</code> hook</a> and image that. <code>--force</code> is required to overwrite a block device, and the target must not be mounted.</p></div>
+<h3 id="disks-browse">Files inside disk images</h3>
+<p>You don't have to restore a whole disk to get one file back. In the explorer (<b>Browse</b> on a disk snapshot), a disk image opens like a folder: first its partitions, with their name, label, file system and size, then their folders and files. Preview, download (also as ZIP or tar) and restore work as for any other backup; Herakles reads only the parts of the image it needs, straight from the repository.</p>
+<table>
+<tr><th>Readable</th><th>Recognised, not browsable</th></tr>
+<tr><td>ext2, ext3, ext4 (also old and 1 KiB-block ones), FAT12/16/32 (EFI partitions, USB sticks), NTFS; partition tables MBR (with logical partitions) and GPT</td>
+<td>XFS, btrfs, exFAT, ReFS, F2FS, HFS+/APFS, ZFS, swap; encrypted (LUKS, BitLocker); LVM and software RAID members. Restore these images with <code>restore-device</code> and open them on a computer.</td></tr>
+</table>
+<p>The same works on the command line, with the partition as a folder (<code>part1</code>, <code>part2</code>, … as numbered in the partition table):</p>
+<pre>herakles ls latest:/dev/disk/by-id/ata-Samsung_SSD                  <span class="c"># the partitions</span>
+herakles ls latest:/dev/disk/by-id/ata-Samsung_SSD/part2/etc -l
+herakles dump latest:/dev/disk/by-id/ata-Samsung_SSD/part2/etc/fstab
+herakles restore latest:/dev/disk/by-id/ata-Samsung_SSD/part2/home/alice --target /tmp/alice</pre>
+<p>A partition image without a partition table (<code>/dev/sda1</code>) is the file system itself, without a <code>part</code> level. Symbolic links are followed inside the file system. The journal is not replayed: an image of a mounted, busy file system shows its state as of its last journal commit (the explorer notes this).</p>
+
 <h3 id="disks-container">Inside a container (LXC, Docker, Podman)</h3>
 <p>A container sees the host's disks in <code>/sys</code>, but cannot read them: the device nodes are not passed in, and the host's device rules block them even when created by hand. Herakles recognises the container: <code>herakles devices</code>, the wizard and the job editor mark those disks as <em>unavailable</em>, and a disk backup fails with an explanation. What works instead:</p>
 <table>

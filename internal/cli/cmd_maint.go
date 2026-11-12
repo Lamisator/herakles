@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lamisator/herakles/internal/backend"
 	"github.com/lamisator/herakles/internal/config"
 	"github.com/lamisator/herakles/internal/crypto"
 	"github.com/lamisator/herakles/internal/repository"
@@ -173,6 +174,13 @@ func (a *App) statsCmd() *cobra.Command {
 			a.printf("  unique data:      %s\n", ui.Bytes(st.RawBytes))
 			a.printf("  stored on disk:   %s (compression %s)\n", ui.Bytes(st.StoredBytes), ui.Ratio(st.RawBytes, st.StoredBytes))
 			a.printf("  all snapshots:    %s (total space saving %s)\n", ui.Bytes(logical), ui.Ratio(logical, st.StoredBytes))
+			if sp, err := backend.SpaceOf(ctx, repo.Backend()); err == nil && sp.Total > 0 {
+				what := "storage"
+				if sp.Quota {
+					what = "quota"
+				}
+				a.printf("  %-17s %s free of %s (%.0f %% used)\n", what+":", ui.Bytes(int64(sp.Free)), ui.Bytes(int64(sp.Total)), 100*float64(sp.Total-min(sp.Free, sp.Total))/float64(sp.Total))
+			}
 			return nil
 		},
 	}

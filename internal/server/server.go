@@ -217,6 +217,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusCreated)
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Query().Has("space") {
+			s.space(w, repo)
+			return
+		}
 		http.Error(w, "unsupported", http.StatusMethodNotAllowed)
 	case len(parts) == 2 && parts[1] == "config":
 		s.object(w, r, be, repo, backend.Handle{Type: backend.ConfigFile})
@@ -422,4 +426,25 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		defer cancel()
 		return srv.Shutdown(sctx)
 	}
+}
+
+// space reports the repository's quota, or the free space of the data
+// directory.
+func (s *Server) space(w http.ResponseWriter, repo string) {
+	var sp backend.Space
+	if s.quota > 0 {
+		used := s.repoSize(repo)
+		sp = backend.Space{Total: uint64(s.quota), Free: uint64(max(s.quota-used, 0)), Quota: true}
+		if disk, err := backend.DiskSpace(s.root); err == nil && disk.Free < sp.Free {
+			sp.Free = disk.Free // the disk fills up before the quota
+		}
+	} else {
+		var err error
+		if sp, err = backend.DiskSpace(s.root); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(sp)
 }

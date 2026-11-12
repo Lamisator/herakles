@@ -71,10 +71,28 @@ them back to a disk or partition.`,
 			} else {
 				close(done)
 			}
-			res, err := restorer.Restore(ctx, repo, snap, p, restorer.Options{
+			opts := restorer.Options{
 				Target: target, Includes: includes, Excludes: excludes, Overwrite: overwrite, Verify: verify, DryRun: dryRun, Owner: owner, Progress: prog,
 				OnError: func(path string, err error) { fmt.Fprintf(a.err, "\r\033[Kerror: %s: %v\n", path, err) },
-			})
+			}
+			var res *restorer.Result
+			if _, ferr := repo.FindNode(ctx, snap.Tree, p); ferr != nil {
+				// Files inside a disk image of the snapshot.
+				img, inner, ierr := imageAt(ctx, repo, snap, p)
+				switch {
+				case ierr != nil:
+					err = ierr
+				case img == nil:
+					err = ferr
+				default:
+					var src restorer.ImageSource
+					if src, err = img.Source(inner); err == nil {
+						res, err = restorer.RestoreImage(ctx, src, opts)
+					}
+				}
+			} else {
+				res, err = restorer.Restore(ctx, repo, snap, p, opts)
+			}
 			stop.Store(true)
 			<-done
 			if err != nil {
@@ -199,8 +217,16 @@ func (a *App) dumpCmd() *cobra.Command {
 				return err
 			}
 			node, err := repo.FindNode(ctx, snap.Tree, p)
+			var img *restorer.Image
+			var inner string
 			if err != nil {
-				return err
+				var ierr error
+				if img, inner, ierr = imageAt(ctx, repo, snap, p); img == nil {
+					if ierr != nil {
+						err = ierr
+					}
+					return err
+				}
 			}
 			var w io.Writer = a.out
 			if output != "" {
@@ -210,6 +236,9 @@ func (a *App) dumpCmd() *cobra.Command {
 				}
 				defer fh.Close()
 				w = fh
+			}
+			if img != nil {
+				return dumpImage(ctx, img, inner, asTar, w)
 			}
 			if asTar || node.Type == repository.NodeDir {
 				return restorer.DumpTar(ctx, repo, node, w)

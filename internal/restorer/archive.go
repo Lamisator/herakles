@@ -28,6 +28,8 @@ func ValidFormat(f string) bool { return f == FormatTar || f == FormatTarGz || f
 type Item struct {
 	Name string // path inside the archive, e.g. "docs" or "docs/a.txt"
 	Node *repository.Node
+	// Image, instead of Node, is an entry inside a disk image.
+	Image *ImageSource
 }
 
 // entrySink receives archive entries.
@@ -55,6 +57,12 @@ func WriteArchive(ctx context.Context, repo *repository.Repository, items []Item
 	}
 	for _, it := range items {
 		name := strings.TrimPrefix(path.Clean("/"+it.Name), "/")
+		if it.Image != nil {
+			if err := writeImage(ctx, sink, name, *it.Image); err != nil {
+				return err
+			}
+			continue
+		}
 		if name != "" {
 			if err := sink.add(name, it.Node, content(it.Node)); err != nil {
 				return err

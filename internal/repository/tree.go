@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lamisator/herakles/internal/id"
@@ -169,6 +170,40 @@ func (r *Repository) FindNode(ctx context.Context, root id.ID, p string) (*Node,
 		cur = next
 	}
 	return cur, nil
+}
+
+// FindImage finds the disk image (device node) that path p leads into: it
+// returns the image node, its path in the snapshot and the rest of p
+// inside the image ("" for the image itself). ok is false when p does not
+// lead into an image.
+func (r *Repository) FindImage(ctx context.Context, root id.ID, p string) (dev *Node, devPath, inner string, ok bool, err error) {
+	cur := &Node{Name: "/", Type: NodeDir, Subtree: &root}
+	parts := splitPath(p)
+	for i, part := range parts {
+		if cur.Type == NodeDevice {
+			devPath = "/" + strings.Join(parts[:i], "/")
+			// Inside the image only "/" separates (a "\\" is part of a name).
+			inner = strings.Join(parts[i:], "/")
+			if full := "/" + strings.Trim(p, "/"); strings.HasPrefix(full, devPath+"/") {
+				inner = strings.TrimPrefix(full, devPath+"/")
+			}
+			return cur, devPath, inner, true, nil
+		}
+		if cur.Type != NodeDir || cur.Subtree == nil {
+			return nil, "", "", false, nil
+		}
+		t, err := r.LoadTree(ctx, *cur.Subtree)
+		if err != nil {
+			return nil, "", "", false, err
+		}
+		if cur = t.Find(part); cur == nil {
+			return nil, "", "", false, nil
+		}
+	}
+	if cur.Type == NodeDevice {
+		return cur, "/" + strings.Join(parts, "/"), "", true, nil
+	}
+	return nil, "", "", false, nil
 }
 
 func splitPath(p string) []string {

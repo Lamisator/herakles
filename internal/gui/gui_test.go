@@ -391,3 +391,19 @@ func TestUpdateAPI(t *testing.T) {
 		t.Fatal("install not called")
 	}
 }
+
+// TestRepoUsage reports a repository's size and its disk's capacity
+// without opening the repository.
+func TestRepoUsage(t *testing.T) {
+	c, _, _ := setup(t, false) // no password: the usage needs none
+	var u repoUsage
+	if code := c.json("GET", "/api/repos/vault/usage", nil, &u); code != 200 {
+		t.Fatal(code)
+	}
+	if u.Error != "" || u.Bytes <= 0 || u.Files < 2 || u.Space == nil || u.Space.Total == 0 || u.Space.Free > u.Space.Total {
+		t.Fatalf("%+v", u)
+	}
+	if code, _ := c.do("GET", "/api/repos/nope/usage", nil); code != 404 {
+		t.Fatal("unknown repository:", code)
+	}
+}

@@ -1115,6 +1115,8 @@ views.repos = async main => {
   main.append(grid);
   for (const r of repos) {
     const statsBox = h('div', { class: 'meta' });
+    const usageBox = h('div', { class: 'usage' }, h('div', { class: 'usage-bar loading' }), h('div', { class: 'meta' }, 'Measuring storage use…'));
+    loadUsage(r.name, usageBox);
     const unlockWith = [r.password ? 'inline password' : r.password_file ? 'password file' : r.password_env ? 'env ' + r.password_env : r.password_command ? 'password command' : null, r.key_file ? 'key file' : null].filter(Boolean).join(' + ') || 'asks for password';
     const m = r.maintenance || {};
     grid.append(h('div', { class: 'card' },
@@ -1124,6 +1126,7 @@ views.repos = async main => {
       h('div', { class: 'meta mono' }, r.location),
       h('div', { class: 'meta' }, 'Unlock: ', unlockWith, ' · compression: ', r.compression || 'auto'),
       m.prune_schedule || m.check_schedule ? h('div', { class: 'meta' }, 'Maintenance: ', [m.prune_schedule ? 'prune ' + m.prune_schedule : '', m.check_schedule ? 'check ' + m.check_schedule : ''].filter(Boolean).join(' · ')) : null,
+      usageBox,
       statsBox,
       h('div', { class: 'actions' },
         h('button', { onclick: async () => {
@@ -1145,6 +1148,37 @@ views.repos = async main => {
         } }, 'Remove'))));
   }
 };
+
+// loadUsage fills a repository card's storage bar: this repository, other
+// data on the same storage, and free space (or the server's quota).
+async function loadUsage(name, box, refresh) {
+  let u;
+  try { u = await api('GET', '/api/repos/' + encodeURIComponent(name) + '/usage' + (refresh ? '?refresh=1' : '')); }
+  catch (e) { clear(box).append(h('div', { class: 'meta' }, 'Storage use unknown: ' + e.message)); return; }
+  const again = h('a', { class: 'usage-refresh', title: 'Measure again', onclick: () => loadUsage(name, box, true) }, icon('refresh'));
+  if (u.error && !u.files) { clear(box).append(h('div', { class: 'meta' }, 'Storage use: ', u.error, ' ', again)); return; }
+  const sp = u.space;
+  if (!sp || !sp.total) {
+    clear(box).append(h('div', { class: 'meta' }, fmtBytes(u.bytes) + ' in ' + u.files + ' files · the storage does not report its capacity ', again));
+    return;
+  }
+  const total = sp.total, free = Math.min(sp.free, total);
+  const used = total - free;
+  const mine = Math.min(u.bytes, used);
+  const other = sp.quota ? 0 : used - mine;
+  const pct = x => (100 * x / total).toFixed(2) + '%';
+  const full = used / total;
+  const seg = (cls, x, title) => x > 0 ? h('span', { class: cls, style: 'width:' + pct(x), title }) : null;
+  const bar = h('div', { class: 'usage-bar' + (full > 0.9 ? ' crit' : full > 0.8 ? ' warn' : '') },
+    seg('mine', mine, 'This repository: ' + fmtBytes(u.bytes)),
+    seg('other', other, 'Other data on this storage: ' + fmtBytes(other)),
+    seg('free', free, 'Free: ' + fmtBytes(free)));
+  const parts = sp.quota
+    ? [h('b', {}, fmtBytes(u.bytes)), ' of the ' + fmtBytes(total) + ' quota on the server · ' + fmtBytes(free) + ' left']
+    : [h('span', { class: 'dot mine' }), 'this repository ', h('b', {}, fmtBytes(u.bytes)), ' · ', h('span', { class: 'dot other' }), 'other ' + fmtBytes(other),
+      ' · ', h('span', { class: 'dot free' }), 'free ' + fmtBytes(free) + ' of ' + fmtBytes(total)];
+  clear(box).append(bar, h('div', { class: 'meta' }, ...parts, ' (' + Math.round(full * 100) + ' % full) ', again));
+}
 
 async function task(repo, kind) {
   try { await api('POST', '/api/repos/' + encodeURIComponent(repo) + '/task/' + kind); toast(kind + ' of ' + repo + ' started — see Dashboard'); }
@@ -2128,7 +2162,9 @@ function startPath(s) {
 }
 
 const PREVIEW_IMG = /\.(png|jpe?g|gif|webp|svg|ico|bmp)$/i;
-const entryIcon = e => e.type === 'dir' ? 'folder' : e.type === 'symlink' ? 'share' : e.type === 'device' ? 'disk' : PREVIEW_IMG.test(e.name) ? 'eye' : 'file';
+const entryIcon = e => e.type === 'dir' ? 'folder' : e.type === 'symlink' ? 'share' : e.type === 'device' || e.type === 'volume' ? 'disk' : PREVIEW_IMG.test(e.name) ? 'eye' : 'file';
+// Folders, disk images and their partitions open like folders.
+const isFolder = e => e.type === 'dir' || e.type === 'device' || e.type === 'volume';
 
 // openExplorer shows a snapshot in a file explorer dialog: navigate,
 // search, preview, select, download and restore. opts: {repo, snapshot
@@ -2195,7 +2231,7 @@ async function openExplorer(opts) {
   };
   const updateFooter = () => {
     let bytes = 0, dirs = 0;
-    selected.forEach(e => { if (e.type === 'dir') dirs++; else bytes += e.size || 0; });
+    selected.forEach(e => { if (isFolder(e)) dirs++; else bytes += e.size || 0; });
     selInfo.textContent = selected.size ? selected.size + ' selected' + (bytes ? ' · ' + fmtBytes(bytes) : '') + (dirs ? ' · ' + dirs + ' folder' + (dirs > 1 ? 's' : '') : '')
       : 'Nothing selected: the buttons act on the current folder';
     dlSel.lastChild.textContent = selected.size ? 'Download selection' : 'Download folder';
@@ -2219,6 +2255,7 @@ async function openExplorer(opts) {
     listBox.classList.remove('loading');
     filter.value = '';
     title.textContent = (snap.job || 'Snapshot') + ' · ' + fmtTime(snap.time);
+    if (entries.some(e => e.image)) title.append(h('span', { class: 'chip', title: 'Read directly from the disk image in the backup. Files can be previewed, downloaded and restored.' }, 'inside a disk image'));
     const parts = path.split('/').filter(Boolean);
     clear(crumbs).append(h('a', { onclick: () => go('/') }, icon('archive'), snap.id.slice(0, 8)),
       ...parts.flatMap((x, i) => [h('span', { class: 'sep' }, '/'), h('a', { onclick: () => go('/' + parts.slice(0, i + 1).join('/')) }, x)]));
@@ -2244,7 +2281,7 @@ async function openExplorer(opts) {
     const list = entries.filter(e => !f || e.name.toLowerCase().includes(f));
     const k = sort.key;
     return list.sort((a, b) => {
-      if ((a.type === 'dir') !== (b.type === 'dir')) return a.type === 'dir' ? -1 : 1;
+      if (isFolder(a) !== isFolder(b)) return isFolder(a) ? -1 : 1;
       let x = k === 'size' ? (a.size || 0) - (b.size || 0) : k === 'mtime' ? new Date(a.mtime) - new Date(b.mtime) : (k === 'path' ? a.path : a.name).localeCompare(k === 'path' ? b.path : b.name, undefined, { numeric: true, sensitivity: 'base' });
       return x * sort.dir;
     });
@@ -2261,13 +2298,16 @@ async function openExplorer(opts) {
       !list.length ? h('tr', {}, h('td', { colspan: 5, class: 'muted' }, mode === 'search' ? 'Nothing found.' : entries.length ? 'No entry matches the filter.' : 'This folder is empty.')) : null,
       list.map(e => h('tr', { class: (selected.has(e.path) ? 'sel' : '') + (current && current.path === e.path ? ' cur' : ''), ondblclick: () => open(e) },
         h('td', { class: 'cb' }, h('input', { type: 'checkbox', checked: selected.has(e.path), onchange: ev => { toggle(e, ev.target.checked); ev.target.closest('tr').classList.toggle('sel', ev.target.checked); } })),
-        h('td', { class: 'wrap' }, h('span', { class: 'entry-name' + (e.type === 'dir' ? ' dir' : ''), onclick: () => open(e) }, icon(entryIcon(e)),
-          mode === 'search' ? relName(e) : e.name, e.link ? h('span', { class: 'muted' }, ' → ' + e.link) : null)),
-        h('td', { class: 'num' }, e.type === 'dir' ? '' : fmtBytes(e.size)), h('td', {}, fmtTime(e.mtime)), h('td', { class: 'mono' }, e.mode)))));
+        h('td', { class: 'wrap' }, h('span', { class: 'entry-name' + (isFolder(e) ? ' dir' : ''), onclick: () => open(e) }, icon(entryIcon(e)),
+          mode === 'search' ? relName(e) : e.type === 'volume' ? e.label : e.name, e.link ? h('span', { class: 'muted' }, ' → ' + e.link) : null),
+          e.type === 'device' ? h('div', { class: 'muted small' }, 'Disk image: open it to browse its partitions and files') : null,
+          e.type === 'volume' && e.note ? h('div', { class: 'muted small' + (e.browsable ? '' : ' warn') }, e.note) : null),
+        h('td', { class: 'num' }, e.type === 'dir' ? '' : fmtBytes(e.size)), h('td', {}, e.type === 'volume' ? '' : fmtTime(e.mtime)), h('td', { class: 'mono' }, e.mode || '')))));
     updateFooter();
   };
   const open = e => {
-    if (e.type === 'dir') { query.value = ''; go(e.path); return; }
+    if (e.type === 'volume' && !e.browsable) { toast(e.label + ': ' + (e.note || 'cannot be browsed'), true); return; }
+    if (isFolder(e)) { query.value = ''; go(e.path); return; }
     showPreview(e);
     render();
   };

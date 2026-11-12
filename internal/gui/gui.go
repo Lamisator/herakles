@@ -85,6 +85,8 @@ type Server struct {
 	agent   func() *hub.AgentState
 	upd     func() update.State
 	install func() error
+	images  imageCache
+	usages  usageCache
 
 	ticketMu sync.Mutex
 	tickets  map[string]time.Time
@@ -351,6 +353,7 @@ func (s *Server) apiMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/repos/{name}/stats", s.stats)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots", s.snapshots)
 	mux.HandleFunc("DELETE /api/repos/{name}/snapshots/{id}", s.forget)
+	mux.HandleFunc("GET /api/repos/{name}/usage", s.usage)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/tree", s.tree)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/download", s.download)
 	mux.HandleFunc("GET /api/repos/{name}/snapshots/{id}/preview", s.preview)
@@ -808,6 +811,12 @@ type treeEntry struct {
 	MTime  time.Time `json:"mtime"`
 	Link   string    `json:"link,omitempty"`
 	Source string    `json:"source,omitempty"`
+	// Inside disk images: Image marks entries read from an image; volumes
+	// (partitions) carry a description, and a note when not browsable.
+	Image     bool   `json:"image,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Note      string `json:"note,omitempty"`
+	Browsable bool   `json:"browsable,omitempty"`
 }
 
 func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
@@ -822,6 +831,16 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 	}
 	p := r.URL.Query().Get("path")
 	node, err := repo.FindNode(r.Context(), snap.Tree, p)
+	if err != nil || node.Type == repository.NodeDevice {
+		img, inner, ok, ierr := s.imageAt(r, repo, snap, p)
+		if ok {
+			s.imageTree(w, img, p, inner)
+			return
+		}
+		if ierr != nil {
+			err = ierr
+		}
+	}
 	if err != nil {
 		s.fail(w, err, "")
 		return
@@ -872,15 +891,41 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	parent := commonDir(paths)
 	var items []restorer.Item
 	for _, p := range paths {
+		name := strings.TrimPrefix(strings.TrimPrefix(path.Clean("/"+p), parent), "/")
 		node, err := repo.FindNode(r.Context(), snap.Tree, p)
+		if err != nil {
+			img, inner, ok, ierr := s.imageAt(r, repo, snap, p)
+			if !ok {
+				if ierr != nil {
+					err = ierr
+				}
+				s.fail(w, err, "")
+				return
+			}
+			src, err := img.Source(inner)
+			if err != nil {
+				s.fail(w, err, "")
+				return
+			}
+			items = append(items, restorer.Item{Name: name, Image: &src})
+			continue
+		}
+		items = append(items, restorer.Item{Name: name, Node: node})
+	}
+	if len(items) == 1 && items[0].Image != nil && items[0].Image.Entry.Type != "dir" && format == "" {
+		src := items[0].Image
+		rd, size, err := src.FS.Open(src.Path) // links: the file they point to
 		if err != nil {
 			s.fail(w, err, "")
 			return
 		}
-		name := strings.TrimPrefix(strings.TrimPrefix(path.Clean("/"+p), parent), "/")
-		items = append(items, restorer.Item{Name: name, Node: node})
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprint(size))
+		w.Header().Set("Content-Disposition", attachment(src.Entry.Name))
+		_, _ = io.Copy(w, io.NewSectionReader(rd, 0, size))
+		return
 	}
-	if len(items) == 1 && items[0].Node.Type != repository.NodeDir && format == "" {
+	if len(items) == 1 && items[0].Node != nil && items[0].Node.Type != repository.NodeDir && format == "" {
 		n := items[0].Node
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprint(n.Size))
@@ -955,10 +1000,40 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	n, err := repo.FindNode(r.Context(), snap.Tree, r.URL.Query().Get("path"))
+	p := r.URL.Query().Get("path")
+	n, err := repo.FindNode(r.Context(), snap.Tree, p)
+	var dump func(io.Writer) error
 	if err != nil {
-		s.fail(w, err, "")
-		return
+		img, inner, ok, ierr := s.imageAt(r, repo, snap, p)
+		if !ok {
+			if ierr != nil {
+				err = ierr
+			}
+			s.fail(w, err, "")
+			return
+		}
+		src, err := img.Source(inner)
+		if err != nil {
+			s.fail(w, err, "")
+			return
+		}
+		n = restorer.ImageEntryNode(src.Entry)
+		if src.Entry.Type == "symlink" {
+			// Show what the link points to, when it is a file.
+			if _, size, err := src.FS.Open(src.Path); err == nil {
+				n.Type, n.Size = repository.NodeFile, uint64(size)
+			}
+		}
+		dump = func(out io.Writer) error {
+			rd, size, err := src.FS.Open(src.Path)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(out, io.NewSectionReader(rd, 0, size))
+			return err
+		}
+	} else {
+		dump = func(out io.Writer) error { return restorer.DumpFile(r.Context(), repo, n, out) }
 	}
 	if n.Type != repository.NodeFile {
 		s.fail(w, errors.New("only files can be previewed"), "")
@@ -972,12 +1047,12 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", ct)
-		_ = restorer.DumpFile(r.Context(), repo, n, w)
+		_ = dump(w)
 		return
 	}
 	const limit = 256 << 10
 	var buf bytes.Buffer
-	_ = restorer.DumpFile(r.Context(), repo, n, &limitWriter{w: &buf, n: limit})
+	_ = dump(&limitWriter{w: &buf, n: limit})
 	data := buf.Bytes()
 	if bytes.IndexByte(data[:min(len(data), 8192)], 0) >= 0 || !utf8.Valid(trimUTF8(data)) {
 		s.fail(w, errors.New("no preview for binary files; download it instead"), "")
@@ -1043,6 +1118,17 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request) {
 	glob := strings.ContainsAny(q, "*?")
 	base := path.Clean("/" + r.URL.Query().Get("path"))
 	node, err := repo.FindNode(r.Context(), snap.Tree, base)
+	if err != nil || node.Type == repository.NodeDevice {
+		if img, inner, ok, _ := s.imageAt(r, repo, snap, base); ok {
+			out, truncated, err := imageFind(img, base, inner, q, glob, 500)
+			if err != nil {
+				s.fail(w, err, "")
+				return
+			}
+			writeJSON(w, 200, map[string]any{"results": out, "truncated": truncated})
+			return
+		}
+	}
 	if err != nil || node.Type != repository.NodeDir || node.Subtree == nil {
 		s.fail(w, fmt.Errorf("%s is not a directory in this snapshot", base), "")
 		return
@@ -1106,14 +1192,35 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
 	var errs []string
 	total := &restorer.Result{}
 	for _, p := range paths {
-		res, err := restorer.Restore(r.Context(), repo, snap, p, restorer.Options{
+		opts := restorer.Options{
 			Target: config.ExpandHome(req.Target), Overwrite: req.Overwrite, Verify: req.Verify, Includes: req.Includes, Excludes: req.Excludes,
 			OnError: func(p string, err error) {
 				if len(errs) < 20 {
 					errs = append(errs, p+": "+err.Error())
 				}
 			},
-		})
+		}
+		var res *restorer.Result
+		var err error
+		if _, ferr := repo.FindNode(r.Context(), snap.Tree, p); ferr != nil {
+			// Files inside a disk image.
+			img, inner, ok, ierr := s.imageAt(r, repo, snap, p)
+			if !ok {
+				if ierr != nil {
+					ferr = ierr
+				}
+				s.fail(w, fmt.Errorf("%s: %w", p, ferr), "")
+				return
+			}
+			src, serr := img.Source(inner)
+			if serr != nil {
+				s.fail(w, serr, "")
+				return
+			}
+			res, err = restorer.RestoreImage(r.Context(), src, opts)
+		} else {
+			res, err = restorer.Restore(r.Context(), repo, snap, p, opts)
+		}
 		if err != nil {
 			s.fail(w, fmt.Errorf("%s: %w", p, err), "")
 			return

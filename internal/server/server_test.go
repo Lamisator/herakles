@@ -146,6 +146,15 @@ func TestServerQuota(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "quota") {
 		t.Fatalf("quota not enforced: %v", err)
 	}
+	// The client sees the quota as the repository's capacity.
+	sp, err := backend.SpaceOf(ctx, be)
+	if err != nil || !sp.Quota || sp.Total != 64<<10 || sp.Free == 0 || sp.Free >= 64<<10-30<<10 {
+		t.Fatalf("space with quota: %+v %v", sp, err)
+	}
+	plain := client(t, newServer(t, config.Server{NoAuth: true}), "p", "", "")
+	if sp, err := backend.SpaceOf(ctx, plain); err != nil || sp.Quota || sp.Total == 0 || sp.Free > sp.Total {
+		t.Fatalf("space without quota: %+v %v", sp, err)
+	}
 }
 
 func TestNewValidation(t *testing.T) {
