@@ -7,6 +7,12 @@ if [ -d /run/systemd/system ]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
   # Upgrade: a running daemon picks up the new version.
   systemctl try-restart herakles.service >/dev/null 2>&1 || true
+  # ... and so do the tray icons of logged-in users (herakles-tray.service).
+  for d in /run/user/[0-9]*; do
+    [ -d "$d/systemd" ] || continue
+    u=$(id -nu "${d##*/}" 2>/dev/null) || continue
+    systemctl --user -M "$u@" try-restart herakles-tray.service >/dev/null 2>&1 || true
+  done
 fi
 # install.sh asks and sets up itself.
 if [ ! -e /etc/herakles/herakles.yaml ] && [ -z "${HERAKLES_INSTALLER:-}" ]; then

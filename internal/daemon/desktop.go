@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lamisator/herakles/internal/sysutil"
@@ -29,6 +30,9 @@ type DesktopShare struct {
 	Version string `json:"version,omitempty"`
 	Host    string `json:"host,omitempty"`
 }
+
+// shareMu guards a share's GUI and Token while reload replaces them.
+var shareMu sync.Mutex
 
 // DesktopPath is the share file of a user ID.
 func DesktopPath(id string) string { return filepath.Join(DesktopDir, id+".json") }
@@ -77,6 +81,18 @@ func RemoveDesktopShares(keep map[string]bool) {
 // current user and answers. Root (LocalSystem) never uses a share: it runs
 // Herakles itself.
 func SharedDesktop() (*DesktopShare, error) {
+	s, err := readShare()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.Status(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// readShare reads the current user's share file.
+func readShare() (*DesktopShare, error) {
 	id, ok := sysutil.SelfID()
 	if !ok {
 		return nil, ErrNotRunning
@@ -89,18 +105,50 @@ func SharedDesktop() (*DesktopShare, error) {
 	if err := json.Unmarshal(b, &s); err != nil || s.GUI == "" || s.Token == "" {
 		return nil, ErrNotRunning
 	}
-	if _, err := s.Status(); err != nil {
-		return nil, err
-	}
 	return &s, nil
 }
 
+func (s *DesktopShare) endpoint() (gui, token string) {
+	shareMu.Lock()
+	defer shareMu.Unlock()
+	return s.GUI, s.Token
+}
+
+// reload picks up the share file the service wrote after a restart (an
+// update, for example) with a new token; it reports whether it changed.
+func (s *DesktopShare) reload() bool {
+	n, err := readShare()
+	if err != nil {
+		return false
+	}
+	shareMu.Lock()
+	defer shareMu.Unlock()
+	if n.GUI == s.GUI && n.Token == s.Token {
+		return false
+	}
+	s.GUI, s.Token, s.Version, s.Host = n.GUI, n.Token, n.Version, n.Host
+	return true
+}
+
+// call sends a request to the service; a refused or unreachable session
+// is retried once with the share file as it is now.
 func (s *DesktopShare) call(method, path string, out any) error {
-	req, err := http.NewRequest(method, s.GUI+path, nil)
+	err := s.do(method, path, out)
+	if (errors.Is(err, ErrNotRunning) || errors.Is(err, errUnauthorized)) && s.reload() {
+		err = s.do(method, path, out)
+	}
+	return err
+}
+
+var errUnauthorized = errors.New("system service: 401 Unauthorized")
+
+func (s *DesktopShare) do(method, path string, out any) error {
+	gui, token := s.endpoint()
+	req, err := http.NewRequest(method, gui+path, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+s.Token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Herakles", "1")
 	c := &http.Client{Timeout: 3 * time.Second}
 	resp, err := c.Do(req)
@@ -108,6 +156,9 @@ func (s *DesktopShare) call(method, path string, out any) error {
 		return ErrNotRunning
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errUnauthorized
+	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("system service: %s", resp.Status)
 	}
@@ -136,5 +187,6 @@ func (s *DesktopShare) OpenURL() (string, error) {
 	if err := s.call("POST", "/api/ticket", &t); err != nil {
 		return "", err
 	}
-	return s.GUI + "/?ticket=" + t.Ticket, nil
+	gui, _ := s.endpoint()
+	return gui + "/?ticket=" + t.Ticket, nil
 }
